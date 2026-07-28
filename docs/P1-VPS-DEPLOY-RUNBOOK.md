@@ -30,11 +30,9 @@ Done on your local PC, before touching the VPS. Collects everything the VPS step
 **Where:** your Windows machine, Command Prompt or PowerShell.
 **What:** confirms you have shell access to the box.
 ```cmd
-ssh khooptong@160.250.204.73
+ssh root@160.250.204.73
 ```
-(Use whatever username your VPS provider gave you — `khooptong` is the example
-from your dashboard. If your provider gave you a different username, use that.)
-**Verify:** you see a prompt like `khooptong@desk:~$`. Type `exit` to leave.
+**Verify:** you see a prompt like `root@desk:~#`. Type `exit` to leave.
 **If it fails:** your VPS provider's dashboard should show SSH credentials or
 let you reset them. Some providers also offer a web console as a fallback.
 
@@ -93,11 +91,11 @@ embeddings endpoint with its URL + key saved.
 
 ## PHASE 1 — VPS basics: connect, update, install packages
 
-**Where:** SSH'd into the VPS (run `ssh khooptong@160.250.204.73` first).
+**Where:** SSH'd into the VPS (run `ssh root@160.250.204.73` first).
 
 ### 1.1 Update the system
 ```bash
-sudo apt update && sudo apt upgrade -y
+apt update && apt upgrade -y
 ```
 **What:** refreshes the package list and applies security updates.
 **Verify:** ends without errors. If it asks "restart services automatically?",
@@ -105,7 +103,7 @@ say yes.
 
 ### 1.2 Install the packages we need
 ```bash
-sudo apt install -y postgresql-16 postgresql-16-pgvector python3.12 python3.12-venv caddy git curl
+apt install -y postgresql-16 postgresql-16-pgvector python3.12 python3.12-venv caddy git curl
 ```
 **What:** installs Postgres 16 + the pgvector extension, Python 3.12 + venv
 support, the Caddy web server (handles TLS automatically), git, and curl.
@@ -118,7 +116,7 @@ git --version
 ```
 **If pgvector package isn't found:** Ubuntu 24.04 should have it, but if not:
 ```bash
-sudo apt install -y postgresql-16-pgvector || sudo apt install -y pgvector
+apt install -y postgresql-16-pgvector || apt install -y pgvector
 ```
 
 ✅ **End of Phase 1.** All tools installed.
@@ -131,7 +129,7 @@ sudo apt install -y postgresql-16-pgvector || sudo apt install -y pgvector
 
 ### 2.1 Create the dedicated user
 ```bash
-sudo useradd --system --create-home --home-dir /opt/fce --shell /usr/sbin/nologin fce
+useradd --system --create-home --home-dir /opt/fce --shell /usr/sbin/nologin fce
 ```
 **What:** creates an unprivileged system user called `fce` whose home is
 `/opt/fce`. The worker will run as this user — never as root, never as your
@@ -145,25 +143,23 @@ the command failed — re-run it.
 
 ### 2.2 Create the deploy directory layout
 ```bash
-sudo mkdir -p /opt/fce/releases
-sudo chown -R fce:fce /opt/fce
-sudo chmod 750 /opt/fce
+mkdir -p /opt/fce/releases
+chown -R fce:fce /opt/fce
+chmod 750 /opt/fce
 ```
 **What:** makes the releases dir and hands ownership of `/opt/fce` to the `fce`
 user. Mode 750 = owner can do everything, group can read, nobody else can see in.
 
-### 2.3 Let the `fce` user fetch from GitHub
-The `fce` user has `nologin` shell, so it can't run interactive git. We'll clone
-the repo **as your user** into a release dir, then hand ownership to `fce`:
+### 2.3 Clone the repo into the deploy dir
 ```bash
-sudo -u khooptong git clone https://github.com/<you>/fin-content-engine.git /opt/fce/releases/initial
-sudo ln -s /opt/fce/releases/initial /opt/fce/current
-sudo chown -R fce:fce /opt/fce/releases /opt/fce/current
+git clone https://github.com/<you>/fin-content-engine.git /opt/fce/releases/initial
+ln -s /opt/fce/releases/initial /opt/fce/current
+chown -R fce:fce /opt/fce/releases /opt/fce/current
 ```
 (Replace `<you>` with your GitHub username. If the repo is private, git will
 prompt for credentials — use a Personal Access Token as the password.)
 **What:** checks out the code into a release dir, makes `/opt/fce/current` a
-symlink to it, and gives the `fce` user ownership.
+symlink to it, and gives the `fce` user ownership (so the worker can read it).
 **Verify:**
 ```bash
 ls -la /opt/fce/current/worker/app/main.py
@@ -180,7 +176,7 @@ Should show the file (the symlink resolves). If "No such file," the clone failed
 
 ### 3.1 Check Postgres is running
 ```bash
-sudo systemctl status postgresql
+systemctl status postgresql
 ```
 **Verify:** green "active (running)". If not: `sudo systemctl enable --now postgresql`.
 
@@ -208,13 +204,13 @@ Should list `vector` (and `plpgsql`). **Save `<DB_PASSWORD>` somewhere safe.**
 
 ### 3.3 (Optional but recommended) Light tuning for 8GB RAM
 ```bash
-sudo tee /etc/postgresql/16/main/conf.d/fce-tuning.conf >/dev/null <<'EOF'
+tee /etc/postgresql/16/main/conf.d/fce-tuning.conf >/dev/null <<'EOF'
 shared_buffers = 1GB
 effective_cache_size = 4GB
 work_mem = 16MB
 maintenance_work_mem = 256MB
 EOF
-sudo systemctl restart postgresql
+systemctl restart postgresql
 ```
 **What:** raises Postgres memory settings from defaults (which assume a tiny
 machine). Makes clustering queries faster. Safe because the worker is the only
@@ -223,7 +219,7 @@ client.
 
 ### 3.4 Confirm Postgres only listens locally (security check)
 ```bash
-sudo grep -i listen_addresses /etc/postgresql/16/main/postgresql.conf
+grep -i listen_addresses /etc/postgresql/16/main/postgresql.conf
 ```
 **Verify:** shows `listen_addresses = 'localhost'` (the default). If it says
 `'*'`, edit it to `'localhost'` and restart — we do NOT want Postgres reachable
@@ -306,7 +302,7 @@ Should say `4`.
 **Where:** SSH'd into the VPS.
 
 ```bash
-sudo tee /opt/fce/.env >/dev/null <<'EOF'
+tee /opt/fce/.env >/dev/null <<'EOF'
 FCE_SUPABASE_URL=https://<your-project-ref>.supabase.co
 FCE_SUPABASE_SERVICE_KEY=<service_role_key_from_phase_0>
 FCE_DATABASE_URL=postgresql://fce:<DB_PASSWORD>@127.0.0.1:5432/fce
@@ -316,8 +312,8 @@ FCE_EMBED_MOCK=false
 FCE_SCHEDULER_MAX_WORKERS=4
 FCE_LOG_LEVEL=INFO
 EOF
-sudo chown fce:fce /opt/fce/.env
-sudo chmod 600 /opt/fce/.env
+chown fce:fce /opt/fce/.env
+chmod 600 /opt/fce/.env
 ```
 **Replace before pasting:**
 - `<your-project-ref>` — the short hash from Supabase Phase 0
@@ -330,7 +326,7 @@ sudo chmod 600 /opt/fce/.env
 backup target, no secrets manager overhead.
 **Verify:**
 ```bash
-sudo cat /opt/fce/.env
+cat /opt/fce/.env
 ```
 (You need `sudo` because mode 600 means even your user can't read it.) Confirm
 all values look right. **Do not commit this file — it's gitignored for a reason.**
@@ -345,7 +341,7 @@ all values look right. **Do not commit this file — it's gitignored for a reaso
 
 ### 7.1 Write the unit file
 ```bash
-sudo tee /etc/systemd/system/fce-worker.service >/dev/null <<'EOF'
+tee /etc/systemd/system/fce-worker.service >/dev/null <<'EOF'
 [Unit]
 Description=Fin-Content Engine worker
 After=network-online.target postgresql.service
@@ -375,19 +371,19 @@ only — Caddy will be the public face). Restart on crash with 5s backoff.
 
 ### 7.2 Enable and start it
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now fce-worker
+systemctl daemon-reload
+systemctl enable --now fce-worker
 ```
 **What:** reloads systemd so it sees the new unit, then enables (start on boot)
 and starts it now.
 
 ### 7.3 Verify it's running
 ```bash
-sudo systemctl status fce-worker
+systemctl status fce-worker
 ```
 **Verify:** green "active (running)". Then check the logs:
 ```bash
-sudo journalctl -u fce-worker -f
+journalctl -u fce-worker -f
 ```
 ( `-f` follows the log like `tail -f`. Ctrl+C to exit.) You should see
 `worker_started` and the list of jobs. Look for `db_pool_opened` — that means
@@ -426,13 +422,13 @@ Should resolve to `160.250.204.73`. Don't proceed until it does.
 If Caddy is already configured for other sites, **append** to the existing
 Caddyfile rather than overwriting. Check first:
 ```bash
-sudo cat /etc/caddy/Caddyfile
+cat /etc/caddy/Caddyfile
 ```
 If it has content, we add to it. If it's the default placeholder, we replace.
 
 To add the fin-content-engine site:
 ```bash
-sudo tee -a /etc/caddy/Caddyfile >/dev/null <<'EOF'
+tee -a /etc/caddy/Caddyfile >/dev/null <<'EOF'
 
 fce.lamkalabs.com {
     reverse_proxy 127.0.0.1:8000
@@ -445,11 +441,11 @@ TLS cert for it, and proxy all requests to the worker on localhost:8000.
 
 ### 8.3 Reload Caddy
 ```bash
-sudo systemctl reload caddy
+systemctl reload caddy
 ```
 **Verify:** Caddy is green:
 ```bash
-sudo systemctl status caddy
+systemctl status caddy
 ```
 Then, from your Windows machine (give TLS ~30s to provision on first hit):
 ```cmd
@@ -468,7 +464,7 @@ running — check Phase 7.3. If it times out, DNS hasn't propagated — wait.
 
 ### 9.1 Watch the worker ingest
 ```bash
-sudo journalctl -u fce-worker -f
+journalctl -u fce-worker -f
 ```
 Within 30 min you should see `ingest_done` lines for the active sources, with
 `new=N embedded=N`. Items are flowing.
@@ -491,33 +487,33 @@ soak (P1-DEPLOY-SOAK-CHECKLIST.md steps 4a–4c) now runs against *this* box.
 
 **Update the code after a change:**
 ```bash
-sudo -u khooptong git -C /opt/fce/current pull
-sudo systemctl restart fce-worker
+git -C /opt/fce/current pull
+systemctl restart fce-worker
 ```
 
 **Check logs:**
 ```bash
-sudo journalctl -u fce-worker -f          # follow
-sudo journalctl -u fce-worker --since "1 hour ago"
+journalctl -u fce-worker -f          # follow
+journalctl -u fce-worker --since "1 hour ago"
 ```
 
 **Restart the worker:**
 ```bash
-sudo systemctl restart fce-worker
+systemctl restart fce-worker
 ```
 
 **Stop / start:**
 ```bash
-sudo systemctl stop fce-worker
-sudo systemctl start fce-worker
+systemctl stop fce-worker
+systemctl start fce-worker
 ```
 
 **Roll back to a previous release** (if you set up release dirs in Phase 2):
 ```bash
-sudo rm /opt/fce/current
-sudo ln -s /opt/fce/releases/<previous> /opt/fce/current
-sudo chown -h fce:fce /opt/fce/current
-sudo systemctl restart fce-worker
+rm /opt/fce/current
+ln -s /opt/fce/releases/<previous> /opt/fce/current
+chown -h fce:fce /opt/fce/current
+systemctl restart fce-worker
 ```
 
 ---
@@ -536,9 +532,9 @@ sudo systemctl restart fce-worker
 
 **Firewall note:** if your VPS has `ufw` enabled, allow Caddy's ports:
 ```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow ssh
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow ssh
 ```
 Do **not** open 5432 (Postgres) or 8000 (worker) to the internet — Caddy proxies
 to them over localhost.
