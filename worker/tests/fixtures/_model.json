@@ -1,0 +1,7 @@
+{
+  "model": "gte-small",
+  "dim": 384,
+  "title_weight_repeat": 2,
+  "body_truncate_chars": 500,
+  "_comment": "Provenance contract (Part II §5.1). The frozen embeddings in clustering.jsonl were produced by feeding `<title> ×N + first K chars of body` to gte-small. If ANY of these four values changes, the fixture embeddings are stale and MUST be regenerated via scripts/generate_embeddings.py. The provenance assertion in conftest.py checks this file against the worker's configured values and fails LOUD (not silent) on mismatch."
+}

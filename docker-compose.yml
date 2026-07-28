@@ -1,0 +1,22 @@
+# Local Postgres + pgvector for tests and `make smoke`.
+# Mirrors the production schema via the supabase/migrations/*.sql files.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: fce-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fce
+    ports:
+      - "5432:5432"
+    volumes:
+      - fce_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fce"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  fce_pgdata:

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <!-- Recorded cassette for test_cold_start_idempotent (EDGAR 8-K). Synthetic
+       content; real EDGAR Atom shape. -->
+  <title>SEC EDGAR Current Filings (test cassette)</title>
+  <link href="https://www.sec.gov/cgi-bin/browse-edgar" rel="self"/>
+  <updated>2025-07-22T14:00:00Z</updated>
+  <entry>
+    <title>8-K — Apple Inc.</title>
+    <link href="https://www.sec.gov/Archives/edgar/data/320193/000032019325000123/"/>
+    <id>urn:sec:edgar:accession-number=000032019325000123</id>
+    <updated>2025-07-22T13:45:00Z</updated>
+    <published>2025-07-22T13:45:00Z</published>
+    <author><name>Apple Inc.</name></author>
+    <summary>Current report pursuant to Section 13 OR 15(d) of The Securities Exchange Act of 1934.</summary>
+  </entry>
+  <entry>
+    <title>8-K — Microsoft Corporation</title>
+    <link href="https://www.sec.gov/Archives/edgar/data/789019/000078901925000045/"/>
+    <id>urn:sec:edgar:accession-number=000078901925000045</id>
+    <published>2025-07-22T12:10:00Z</published>
+    <author><name>Microsoft Corporation</name></author>
+    <summary>Item 2.02 Results of Operations and Financial Condition.</summary>
+  </entry>
+</feed>

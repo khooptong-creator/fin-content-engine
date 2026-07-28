@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fce-worker"
+version = "0.1.0"
+description = "Fin-Content Engine worker — ingest, dedup, embed, cluster."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "apscheduler>=3.10",
+    "psycopg[binary,pool]>=3.1",
+    "pgvector>=0.3",
+    "httpx>=0.27",
+    "feedparser>=6.0",
+    "readability-lxml>=0.8",
+    "charset-normalizer>=3.3",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "structlog>=24.1",
+    "tenacity>=8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "pytest-timeout>=2.3",
+]
+
+# Make `from app...` importable when installed with `pip install -e worker[dev]`.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Session-scoped loop so the shared DB pool stays bound to a live loop across
+# all integration tests. (Function scope kills the loop after test 1, leaving
+# the pool attached to a dead loop → test 2 hangs.)
+asyncio_default_fixture_loop_scope = "session"
+markers = [
+    "integration: tests requiring the local Docker Postgres+pgvector DB",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:apscheduler.*",
+]
+
+[tool.setuptools.package-data]
+app = ["py.typed"]

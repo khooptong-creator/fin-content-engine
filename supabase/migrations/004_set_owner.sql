@@ -1,0 +1,21 @@
+-- Fin-Content Engine — one-time RLS owner swap (Part II §2.3).
+--
+-- STATUS: COMMITTED-EMPTY STUB. P3 fills this in.
+--
+-- After the owner's first magic-link login (P3 GUI), look up their auth.uid(),
+-- then replace <OWNER_UID> below with that uuid and run this migration.
+-- It rewrites all the owner_only_select policies created in 002_rls.sql to point
+-- at the real owner instead of the all-zeros sentinel.
+--
+-- To find the uid after first login, run in Supabase studio:
+--     SELECT id, email FROM auth.users;
+--
+-- Then (replacing the literal):
+--     :OWNER_UID = '...'::uuid
+
+-- This file intentionally does nothing until P3. The RLS policies in 002_rls.sql
+-- use an all-zeros sentinel; the service-role worker is unaffected, and the GUI
+-- (anon-key, authenticated user) won't be able to read anything until this runs.
+-- That's the desired locked state during P1/P2: no GUI exists yet, so no read
+-- path that could accidentally leak data.
+SELECT 1;  -- no-op so the migration applies cleanly

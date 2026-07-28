@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <!-- Recorded cassette for test_cold_start_idempotent. Real-shape RSS payload;
+       content is synthetic so the test is deterministic. Refresh from live feed
+       when the feed's shape changes (rare); see TUNING.md / `make smoke`. -->
+  <channel>
+    <title>ET Markets (test cassette)</title>
+    <link>https://economictimes.indiatimes.com</link>
+    <description>Synthetic test feed for cold-start smoke test</description>
+    <item>
+      <title>Tata Sons files draft papers for IPO with regulator</title>
+      <link>https://economictimes.indiatimes.com/markets/tata-sons-ipo-draft</link>
+      <pubDate>Tue, 22 Jul 2025 09:30:00 +0530</pubDate>
+      <description>The holding company of the Tata Group filed draft red herring prospectus documents with the market regulator on Tuesday, kicking off what is expected to be one of the largest Indian listings in years.</description>
+    </item>
+    <item>
+      <title>RBI holds repo rate steady at October policy review</title>
+      <link>https://economictimes.indiatimes.com/markets/rbi-october-policy</link>
+      <pubDate>Wed, 08 Oct 2025 10:00:00 +0530</pubDate>
+      <description>The monetary policy committee voted to maintain the benchmark lending rate, citing sticky food inflation and the need to see sustained disinflation.</description>
+    </item>
+    <item>
+      <title>What is an IPO? An explainer for new investors</title>
+      <link>https://economictimes.indiatimes.com/markets/ipo-explainer</link>
+      <pubDate>Mon, 14 Jul 2025 06:00:00 +0530</pubDate>
+      <description>An initial public offering is the process by which a private company sells shares to the public for the first time. This explainer walks through the mechanics and what changes for the business afterwards.</description>
+    </item>
+  </channel>
+</rss>
