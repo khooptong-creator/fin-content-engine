@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fce-embedder"
+version = "0.1.0"
+description = "Local embedding service for Fin-Content Engine (gte-small, 384-dim)."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "sentence-transformers>=3.0",
+    "pydantic>=2.6",
+]
+
+[tool.setuptools]
+packages = []

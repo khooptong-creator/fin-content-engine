@@ -4,21 +4,39 @@
 does, and **how to verify** it worked. Work top to bottom; don't skip verify steps.
 
 **Goal:** the fin-content-engine worker running on your VPS (reachable at IP
-`160.250.204.73`, public hostname `fce.lamkalabs.com` once DNS is set up in
-Phase 8), behind Caddy TLS, talking to local Postgres+pgvector and the cloud
-Supabase edge function for embeddings. Zero Railway, zero cloud DB cost.
-Co-located on the box alongside your trading desk — isolated via a dedicated
-`fce` user, a separate `fce` Postgres database, and a separate systemd service.
+`160.250.204.73`, public hostname `fce.lamkalabs.com` via DNS), behind Caddy
+TLS, talking to local Postgres+pgvector and a local embedder service
+(self-hosted gte-small). **Zero external cloud dependencies in P1** — no
+Railway, no cloud DB, no cloud embeddings. Co-located on the box alongside your
+trading desk — isolated via a dedicated `fce` user, a separate `fce` Postgres
+database, and two separate systemd services (worker + embedder).
 
-**Topology reminder:**
+**Topology:**
 ```
-Internet → Caddy (TLS) → worker (systemd, :8000) → Postgres+pgvector (:5432)
-                                              └→ Supabase cloud (embeddings only)
+                        Internet
+                           │
+                           ▼
+            ┌──────────────────────────────┐
+            │  Caddy  (TLS for fce.lamkalabs.com)
+            │  → 127.0.0.1:8000 (worker)   │
+            └──────────────────────────────┘
+                           │ localhost
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+   ┌─────────┐      ┌──────────────┐    ┌──────────────┐
+   │ worker  │ ───→ │  embedder    │    │  Postgres 16 │
+   │ :8000   │ ───→ │  :8001       │    │  + pgvector  │
+   │ systemd │      │  gte-small   │    │  db: fce     │
+   └─────────┘      └──────────────┘    └──────────────┘
 ```
 
-**Two things you'll need before starting:**
-- A GitHub account (the free tier is fine; we'll make a private repo).
-- A Supabase account (free tier; we only use it for the edge function).
+**What you need before starting:**
+- A GitHub account (free tier; we make a private repo).
+- SSH access to the VPS (Phase 0.1 confirms this).
+- The repo pushed to GitHub (Phase 0.2).
+- DNS pointed at the box (Phase 8 — already done: `fce.lamkalabs.com` → `160.250.204.73`).
+
+**No Supabase account needed in P1.** Supabase comes back in P3 for GUI auth.
 
 ---
 
@@ -55,37 +73,24 @@ git push -u origin main
 the password if asked — GitHub no longer accepts account passwords over HTTPS.)
 **Verify:** refresh the GitHub repo page; you should see all 51 files.
 
-### 0.3 Create the Supabase project + deploy the edge function
-**Where:** your browser (supabase.com) and Command Prompt.
-**What:** stands up the embeddings endpoint. This is the ONLY thing we keep
-Supabase for.
+### 0.3 Embeddings — self-hosted on the VPS (no Supabase in P1)
+**Where:** nothing to do in Phase 0 — the embedder is built into the repo
+(`embedder/app.py`) and we install it as part of the VPS setup (Phase 4).
 
-1. https://supabase.com/dashboard → **New project**. Name: `fin-content-engine`.
-   Pick a strong DB password and **save it** (you won't need the DB itself, but
-   the project needs one to exist). Wait ~2 min for provisioning.
-2. **Project Settings → API** — collect these three values into a notes file:
-   - `Project URL` (looks like `https://abcdxyz.supabase.co`)
-   - `service_role` secret key (long string; click "Reveal")
-   - `Project Ref` (in **Settings → General**, a short hash like `abcdxyz...`)
-3. Deploy the edge function from your Windows machine:
-   ```cmd
-   npm install -g supabase
-   supabase login
-   ```
-   (Browser opens to auth. Approve.)
-   ```cmd
-   cd "F:\Content Creation Project"
-   supabase functions deploy embed --project-ref <your-project-ref>
-   ```
-4. **Test it works** — in Command Prompt:
-   ```cmd
-   curl -X POST https://<your-project-ref>.functions.supabase.co/embed -H "Authorization: Bearer <service_role_key>" -H "Content-Type: application/json" -d "{\"text\":\"Tata Sons IPO\"}"
-   ```
-   **Verify:** you get back `{"embedding":[...a long list of numbers...]}`.
-   **If it fails:** check Supabase dashboard → Edge Functions → `embed` → Logs.
+**Why no Supabase:** the original plan was to use Supabase's hosted gte-small
+edge function for embeddings. In testing it OOM-killed on the free tier
+(`EarlyDrop` — 10MB memory ceiling too small to load the model). We replaced
+it with a local embedder service on the VPS: a ~40-line FastAPI app wrapping
+`sentence-transformers/gte-small`, running on `127.0.0.1:8001` as its own
+systemd service (`fce-embedder.service`).
 
-✅ **End of Phase 0.** You now have: SSH access, code on GitHub, and a working
-embeddings endpoint with its URL + key saved.
+This is Option C from the deploy design — self-host the heavy stuff on the VPS.
+Consequence: **P1 has zero external cloud dependencies.** No Supabase project,
+no API keys, no egress costs, no pause-on-inactivity. Supabase comes back in
+P3 for the GUI's auth (magic-link login).
+
+✅ **End of Phase 0.** You now have: SSH access, DNS pointed, code on GitHub.
+That's all the prerequisites — the embedder ships with the repo.
 
 ---
 
@@ -154,17 +159,21 @@ user. Mode 750 = owner can do everything, group can read, nobody else can see in
 ```bash
 git clone https://github.com/<you>/fin-content-engine.git /opt/fce/releases/initial
 ln -s /opt/fce/releases/initial /opt/fce/current
-chown -R fce:fce /opt/fce/releases /opt/fce/current
+mkdir -p /opt/fce/embedder
+chown -R fce:fce /opt/fce/releases /opt/fce/current /opt/fce/embedder
 ```
 (Replace `<you>` with your GitHub username. If the repo is private, git will
 prompt for credentials — use a Personal Access Token as the password.)
 **What:** checks out the code into a release dir, makes `/opt/fce/current` a
-symlink to it, and gives the `fce` user ownership (so the worker can read it).
+symlink to it, and gives the `fce` user ownership. The extra `/opt/fce/embedder`
+dir is for the embedder service's venv (Phase 4.2) — it lives outside `current`
+so it survives release rollbacks.
 **Verify:**
 ```bash
 ls -la /opt/fce/current/worker/app/main.py
+ls -la /opt/fce/current/embedder/app.py
 ```
-Should show the file (the symlink resolves). If "No such file," the clone failed.
+Both should show files (the symlink resolves). If "No such file," the clone failed.
 
 ✅ **End of Phase 2.** User + code in place.
 
@@ -229,37 +238,50 @@ from the internet.
 
 ---
 
-## PHASE 4 — Python environment + dependencies
+## PHASE 4 — Python environments + dependencies (worker AND embedder)
 
 **Where:** SSH'd into the VPS.
 
-### 4.1 Create the venv as the `fce` user
+There are **two** Python services: the worker (FastAPI + APScheduler, reads
+feeds and clusters) and the embedder (FastAPI + sentence-transformers, serves
+gte-small embeddings). Each gets its own venv so dependency upgrades don't
+cross-contaminate.
+
+### 4.1 Worker venv
 ```bash
 sudo -u fce /usr/bin/python3.12 -m venv /opt/fce/.venv
-```
-**What:** creates an isolated Python environment at `/opt/fce/.venv`.
-**Verify:**
-```bash
-/opt/fce/.venv/bin/python --version
-```
-Should print `Python 3.12.x`.
-
-### 4.2 Install the worker dependencies
-```bash
 sudo -u fce /opt/fce/.venv/bin/pip install --upgrade pip
 sudo -u fce /opt/fce/.venv/bin/pip install -e /opt/fce/current/worker
 ```
-**What:** installs FastAPI, APScheduler, psycopg3, pgvector, feedparser, etc.
-The `-e` (editable) install means code changes under `/opt/fce/current` take
-effect on worker restart without reinstalling.
-**Verify:** this should print the worker's banner without error:
+**What:** creates the worker's venv at `/opt/fce/.venv` and installs FastAPI,
+APScheduler, psycopg3, pgvector, feedparser, etc. The `-e` (editable) install
+means code changes under `/opt/fce/current` take effect on worker restart.
+**Verify:**
 ```bash
+/opt/fce/.venv/bin/python --version          # Python 3.12.x
 /opt/fce/.venv/bin/python -c "from app.main import app; print('import ok')"
 ```
-(If "import ok" prints, every dependency resolved.)
-**If it fails:** the error usually names the missing package. Share it and we'll fix.
+If "import ok" prints, every worker dependency resolved.
 
-✅ **End of Phase 4.** Worker can run.
+### 4.2 Embedder venv + pre-download the model
+```bash
+sudo -u fce /usr/bin/python3.12 -m venv /opt/fce/embedder/.venv
+sudo -u fce /opt/fce/embedder/.venv/bin/pip install --upgrade pip
+sudo -u fce /opt/fce/embedder/.venv/bin/pip install -e /opt/fce/current/embedder
+```
+**What:** creates the embedder's venv and installs `sentence-transformers`
+(which pulls `torch` — a ~800MB download, this step takes a few minutes).
+**Pre-warm the model** so the first real request isn't slow:
+```bash
+sudo -u fce /opt/fce/embedder/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('thenlper/gte-small')"
+```
+This downloads `gte-small` (~130MB) from Hugging Face and caches it. The first
+time takes ~30s; subsequent loads are instant.
+**Verify:** the command finishes without error. (If it can't reach
+`huggingface.co`, check the VPS's outbound network — some providers block
+default routes.)
+
+✅ **End of Phase 4.** Both services can run.
 
 ---
 
@@ -297,17 +319,15 @@ Should say `4`.
 
 ---
 
-## PHASE 6 — The `.env` file (secrets)
+## PHASE 6 — The `.env` file (worker config)
 
 **Where:** SSH'd into the VPS.
 
 ```bash
 tee /opt/fce/.env >/dev/null <<'EOF'
-FCE_SUPABASE_URL=https://<your-project-ref>.supabase.co
-FCE_SUPABASE_SERVICE_KEY=<service_role_key_from_phase_0>
 FCE_DATABASE_URL=postgresql://fce:<DB_PASSWORD>@127.0.0.1:5432/fce
 FCE_EDGAR_USER_AGENT=Fin-Content Engine fin-content@lamkalabs.com (Your Name)
-FCE_EMBEDDING_EDGE_FUNCTION_URL=https://<your-project-ref>.functions.supabase.co/embed
+FCE_EMBEDDING_EDGE_FUNCTION_URL=http://127.0.0.1:8001/embed
 FCE_EMBED_MOCK=false
 FCE_SCHEDULER_MAX_WORKERS=4
 FCE_LOG_LEVEL=INFO
@@ -316,36 +336,66 @@ chown fce:fce /opt/fce/.env
 chmod 600 /opt/fce/.env
 ```
 **Replace before pasting:**
-- `<your-project-ref>` — the short hash from Supabase Phase 0
-- `<service_role_key_from_phase_0>` — the long service_role key
 - `<DB_PASSWORD>` — the password you set in Phase 3.2
 - `(Your Name)` — your actual name (EDGAR requires a human-readable UA)
 
-**What:** writes all config to `/opt/fce/.env`, owned by `fce`, readable only by
-`fce` (mode 600 = owner-only). This is option A from the design — one file, one
-backup target, no secrets manager overhead.
+**Note:** no Supabase values in P1. Embeddings point at the local embedder
+service (`127.0.0.1:8001`), which we set up in Phase 4.2 and start in Phase 7.
+Supabase URLs/keys aren't needed until P3 (GUI auth); leave them out.
+
+**What:** writes the worker's config to `/opt/fce/.env`, owned by `fce`,
+readable only by `fce` (mode 600 = owner-only). One file, one backup target,
+no secrets-manager overhead.
 **Verify:**
 ```bash
 cat /opt/fce/.env
 ```
-(You need `sudo` because mode 600 means even your user can't read it.) Confirm
-all values look right. **Do not commit this file — it's gitignored for a reason.**
+As root you can read it directly. Confirm all values look right. **Do not
+commit this file — it's gitignored for a reason.**
 
 ✅ **End of Phase 6.** Secrets configured.
 
 ---
 
-## PHASE 7 — The systemd unit (the worker as a service)
+## PHASE 7 — systemd units (embedder + worker as services)
 
 **Where:** SSH'd into the VPS.
 
-### 7.1 Write the unit file
+Two services to install: the **embedder** first (the worker depends on it for
+embeddings), then the **worker**.
+
+### 7.1 Install the embedder unit
+```bash
+cp /opt/fce/current/embedder/fce-embedder.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now fce-embedder
+```
+**What:** copies the embedder's unit file from the repo into systemd, reloads,
+then enables + starts it. The unit (from `embedder/fce-embedder.service`) runs
+the embedder as user `fce` on `127.0.0.1:8001`, restarts on failure.
+**Verify it's running and the model loaded:**
+```bash
+systemctl status fce-embedder
+curl http://127.0.0.1:8001/health
+```
+`status` should show green "active (running)". The `/health` response should
+include `"model_loaded": true`. **First start takes ~5s** (loading gte-small);
+if `/health` says `model_loaded: false`, wait 10s and retry.
+**Test an actual embedding:**
+```bash
+curl -X POST http://127.0.0.1:8001/embed -H "Content-Type: application/json" -d '{"text":"Tata Sons IPO"}'
+```
+Should return `{"embedding":[...384 numbers...]}`. If this works, the embedder
+is fully operational — the hardest piece is done.
+
+### 7.2 Install the worker unit
 ```bash
 tee /etc/systemd/system/fce-worker.service >/dev/null <<'EOF'
 [Unit]
 Description=Fin-Content Engine worker
-After=network-online.target postgresql.service
+After=network-online.target postgresql.service fce-embedder.service
 Wants=network-online.target
+Requires=fce-embedder.service
 
 [Service]
 Type=simple
@@ -364,28 +414,19 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-```
-**What:** tells systemd how to run the worker: as user `fce`, from the worker
-dir, reading env vars from `.env`, listening on `127.0.0.1:8000` (localhost
-only — Caddy will be the public face). Restart on crash with 5s backoff.
-
-### 7.2 Enable and start it
-```bash
 systemctl daemon-reload
 systemctl enable --now fce-worker
 ```
-**What:** reloads systemd so it sees the new unit, then enables (start on boot)
-and starts it now.
+**What:** writes the worker's unit file (note `Requires=fce-embedder.service` —
+systemd won't start the worker until the embedder is up), reloads, enables,
+starts. Restart on crash with 5s backoff.
 
-### 7.3 Verify it's running
+### 7.3 Verify the worker is running
 ```bash
 systemctl status fce-worker
-```
-**Verify:** green "active (running)". Then check the logs:
-```bash
 journalctl -u fce-worker -f
 ```
-( `-f` follows the log like `tail -f`. Ctrl+C to exit.) You should see
+(`-f` follows the log like `tail -f`. Ctrl+C to exit.) You should see
 `worker_started` and the list of jobs. Look for `db_pool_opened` — that means
 it connected to Postgres.
 
@@ -397,7 +438,7 @@ curl http://127.0.0.1:8000/health
 **If `db_reachable` is false:** check `/opt/fce/.env` has the right DB password
 and the `fce` role exists (Phase 3.2).
 
-✅ **End of Phase 7.** Worker is live on localhost.
+✅ **End of Phase 7.** Both services are live on localhost.
 
 ---
 
@@ -485,27 +526,36 @@ soak (P1-DEPLOY-SOAK-CHECKLIST.md steps 4a–4c) now runs against *this* box.
 
 ## Day-to-day operations (cheat sheet)
 
-**Update the code after a change:**
+**Update the worker code after a change:**
 ```bash
 git -C /opt/fce/current pull
 systemctl restart fce-worker
 ```
 
+**Update the embedder code after a change:**
+```bash
+git -C /opt/fce/current pull
+systemctl restart fce-embedder
+```
+
 **Check logs:**
 ```bash
-journalctl -u fce-worker -f          # follow
+journalctl -u fce-worker -f          # follow worker
+journalctl -u fce-embedder -f        # follow embedder
 journalctl -u fce-worker --since "1 hour ago"
 ```
 
-**Restart the worker:**
+**Restart the worker / embedder:**
 ```bash
 systemctl restart fce-worker
+systemctl restart fce-embedder
 ```
 
 **Stop / start:**
 ```bash
 systemctl stop fce-worker
 systemctl start fce-worker
+# (same for fce-embedder)
 ```
 
 **Roll back to a previous release** (if you set up release dirs in Phase 2):
@@ -513,6 +563,7 @@ systemctl start fce-worker
 rm /opt/fce/current
 ln -s /opt/fce/releases/<previous> /opt/fce/current
 chown -h fce:fce /opt/fce/current
+systemctl restart fce-embedder
 systemctl restart fce-worker
 ```
 
@@ -522,10 +573,12 @@ systemctl restart fce-worker
 
 | Symptom | First check |
 |---|---|
-| `systemctl status` shows "failed" | `sudo journalctl -u fce-worker -n 50` — the traceback is there |
+| `systemctl status fce-worker` shows "failed" | `journalctl -u fce-worker -n 50` — the traceback is there |
+| `systemctl status fce-embedder` shows "failed" | `journalctl -u fce-embedder -n 50` — usually a model-load failure or OOM |
 | `/health` returns `db_reachable:false` | `.env` DB password; `fce` role exists; Postgres running |
-| `/health` returns `scheduler_running:false` | restart the worker: `sudo systemctl restart fce-worker` |
-| `/stats` shows `embedding_health:"degraded"` | Supabase edge function down — check Supabase dashboard logs |
+| `/health` returns `scheduler_running:false` | restart the worker: `systemctl restart fce-worker` |
+| `/stats` shows `embedding_health:"degraded"` | embedder not running or erroring — `curl http://127.0.0.1:8001/health`; check `journalctl -u fce-embedder -n 50` |
+| `curl 127.0.0.1:8001/embed` returns 5xx | embedder crashed mid-model; `systemctl restart fce-embedder`; if it loops, the model file may be corrupt — re-run Phase 4.2's pre-warm step |
 | Caddy returns 502 | worker not running — Phase 7.3 |
 | Caddy returns TLS error | DNS not propagated, or port 80/443 blocked by VPS firewall |
 | No items appearing | check `audit_log` table for `ingest_error` rows; sources may have auto-disabled |

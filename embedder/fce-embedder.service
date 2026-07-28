@@ -1,0 +1,27 @@
+[Unit]
+Description=Fin-Content Engine embedder (local gte-small embeddings)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fce
+Group=fce
+WorkingDirectory=/opt/fce/embedder
+# No EnvironmentFile needed — the embedder has no secrets. Model name can be
+# overridden via FCE_EMBED_MODEL if you ever swap models.
+Environment=FCE_EMBED_MODEL=thenlper/gte-small
+ExecStart=/opt/fce/embedder/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=10
+
+# Slightly longer restart interval than the worker (10s vs 5s) because model
+# load takes ~3-5s on cold start — we don't want a tight restart loop hammering
+# the box if something is wrong with the model file.
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

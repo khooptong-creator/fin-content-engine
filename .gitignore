@@ -15,6 +15,12 @@ venv/
 .env.*.local
 !.env.example
 
+# Local-only notes / password files (NEVER commit these)
+*PW*.txt
+*password*.txt
+*secret*.txt
+FCESupa*.txt
+
 # Supabase
 supabase/.branches/
 supabase/.temp/

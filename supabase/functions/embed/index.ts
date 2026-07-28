@@ -75,3 +75,7 @@ function json(payload: unknown, status: number): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+// Tell Deno to actively serve the handler. Required on Supabase's current runtime;
+// without it the function deploys but never answers requests.
+Deno.serve(handler);
