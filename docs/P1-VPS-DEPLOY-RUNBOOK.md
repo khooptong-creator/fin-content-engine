@@ -3,9 +3,12 @@
 **Audience:** novice-friendly. Every command says **where** to type it, **what** it
 does, and **how to verify** it worked. Work top to bottom; don't skip verify steps.
 
-**Goal:** the fin-content-engine worker running on your VPS (`desk.lamkalabs`),
-behind Caddy TLS, talking to local Postgres+pgvector and the cloud Supabase edge
-function for embeddings. Zero Railway, zero cloud DB cost.
+**Goal:** the fin-content-engine worker running on your VPS (reachable at IP
+`160.250.204.73`, public hostname `fce.lamkalabs.com` once DNS is set up in
+Phase 8), behind Caddy TLS, talking to local Postgres+pgvector and the cloud
+Supabase edge function for embeddings. Zero Railway, zero cloud DB cost.
+Co-located on the box alongside your trading desk — isolated via a dedicated
+`fce` user, a separate `fce` Postgres database, and a separate systemd service.
 
 **Topology reminder:**
 ```
@@ -27,10 +30,10 @@ Done on your local PC, before touching the VPS. Collects everything the VPS step
 **Where:** your Windows machine, Command Prompt or PowerShell.
 **What:** confirms you have shell access to the box.
 ```cmd
-ssh khooptong@desk.lamkalabs.net
+ssh khooptong@160.250.204.73
 ```
-(Use whatever user your VPS provider gave you. If your provider gave you an IP
-instead of a hostname, use `ssh <user>@160.250.204.73`.)
+(Use whatever username your VPS provider gave you — `khooptong` is the example
+from your dashboard. If your provider gave you a different username, use that.)
 **Verify:** you see a prompt like `khooptong@desk:~$`. Type `exit` to leave.
 **If it fails:** your VPS provider's dashboard should show SSH credentials or
 let you reset them. Some providers also offer a web console as a fallback.
@@ -90,7 +93,7 @@ embeddings endpoint with its URL + key saved.
 
 ## PHASE 1 — VPS basics: connect, update, install packages
 
-**Where:** SSH'd into the VPS (run `ssh khooptong@desk.lamkalabs.net` first).
+**Where:** SSH'd into the VPS (run `ssh khooptong@160.250.204.73` first).
 
 ### 1.1 Update the system
 ```bash
@@ -307,7 +310,7 @@ sudo tee /opt/fce/.env >/dev/null <<'EOF'
 FCE_SUPABASE_URL=https://<your-project-ref>.supabase.co
 FCE_SUPABASE_SERVICE_KEY=<service_role_key_from_phase_0>
 FCE_DATABASE_URL=postgresql://fce:<DB_PASSWORD>@127.0.0.1:5432/fce
-FCE_EDGAR_USER_AGENT=Fin-Content Engine fin-content@lamkalabs (Your Name)
+FCE_EDGAR_USER_AGENT=Fin-Content Engine fin-content@lamkalabs.com (Your Name)
 FCE_EMBEDDING_EDGE_FUNCTION_URL=https://<your-project-ref>.functions.supabase.co/embed
 FCE_EMBED_MOCK=false
 FCE_SCHEDULER_MAX_WORKERS=4
@@ -407,15 +410,15 @@ and the `fce` role exists (Phase 3.2).
 **Where:** SSH'd into the VPS. Needs DNS done first.
 
 ### 8.1 Point DNS at the box
-In your DNS provider (wherever `lamkalabs` is managed), add an A record:
-- **Host:** `fce` (so the full domain is `fce.lamkalabs`) — or pick another name
+In your DNS provider (wherever `lamkalabs.com` is managed), add an A record:
+- **Host:** `fce` (so the full domain is `fce.lamkalabs.com`)
 - **Type:** A
 - **Value:** `160.250.204.73` (your VPS IP from the dashboard)
 - **TTL:** default
 
 **Verify:** wait 1–5 min, then from your Windows machine:
 ```cmd
-nslookup fce.lamkalabs
+nslookup fce.lamkalabs.com
 ```
 Should resolve to `160.250.204.73`. Don't proceed until it does.
 
@@ -431,13 +434,13 @@ To add the fin-content-engine site:
 ```bash
 sudo tee -a /etc/caddy/Caddyfile >/dev/null <<'EOF'
 
-fce.lamkalabs {
+fce.lamkalabs.com {
     reverse_proxy 127.0.0.1:8000
 }
 EOF
 ```
 (The leading blank line separates it from whatever's already there.)
-**What:** tells Caddy to serve `fce.lamkalabs`, auto-provision a Let's Encrypt
+**What:** tells Caddy to serve `fce.lamkalabs.com`, auto-provision a Let's Encrypt
 TLS cert for it, and proxy all requests to the worker on localhost:8000.
 
 ### 8.3 Reload Caddy
@@ -450,7 +453,7 @@ sudo systemctl status caddy
 ```
 Then, from your Windows machine (give TLS ~30s to provision on first hit):
 ```cmd
-curl https://fce.lamkalabs/health
+curl https://fce.lamkalabs.com/health
 ```
 **Verify:** `{"process":"up",...}` over HTTPS. If it 502's, the worker isn't
 running — check Phase 7.3. If it times out, DNS hasn't propagated — wait.
@@ -473,7 +476,7 @@ Within 30 min you should see `ingest_done` lines for the active sources, with
 ### 9.2 Check /stats
 From your Windows machine:
 ```cmd
-curl https://fce.lamkalabs/stats
+curl https://fce.lamkalabs.com/stats
 ```
 **Verify:** `items.total` grows over time; `embedding_health` is `"ok"`;
 `items.orphaned` stays `0`.
