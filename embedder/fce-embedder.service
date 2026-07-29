@@ -7,7 +7,12 @@ Wants=network-online.target
 Type=simple
 User=fce
 Group=fce
-WorkingDirectory=/opt/fce/embedder
+# WorkingDirectory MUST be /opt/fce (a dir fce owns), NOT /opt/fce/embedder.
+# sentence-transformers 5.x falls back to treating the model id as a relative
+# path when Hub resolution hiccups, and reads/writes CWD-relative files during
+# load. Starting from / means those writes hit permission errors and the service
+# crash-loops. /opt/fce is fce's home dir; safe to write to.
+WorkingDirectory=/opt/fce
 # No EnvironmentFile needed — the embedder has no secrets. Model name can be
 # overridden via FCE_EMBED_MODEL if you ever swap models.
 Environment=FCE_EMBED_MODEL=thenlper/gte-small

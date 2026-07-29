@@ -43,7 +43,14 @@ async def lifespan(app: FastAPI):
     # Load the model once at startup; keep it resident in _state.
     print(f"loading model: {MODEL_NAME}", flush=True)
     _state["model"] = SentenceTransformer(MODEL_NAME)
-    dim = _state["model"].get_sentence_embedding_dimension()
+    # sentence-transformers 5.x renamed get_sentence_embedding_dimension →
+    # get_embedding_dimension. Use the new name; fall back for older versions.
+    dim_fn = getattr(
+        _state["model"],
+        "get_embedding_dimension",
+        getattr(_state["model"], "get_sentence_embedding_dimension"),
+    )
+    dim = dim_fn()
     if dim != EMBEDDING_DIM:
         raise RuntimeError(
             f"model {MODEL_NAME} returns {dim}-dim embeddings; "
