@@ -189,3 +189,23 @@ CREATE TABLE IF NOT EXISTS evergreen_bank (
     last_used_at    timestamptz,
     rotation_months integer NOT NULL DEFAULT 6
 );
+
+-- =========================================================================
+-- Privileges
+-- =========================================================================
+-- Migrations run as the `postgres` superuser, so every table above is owned
+-- by `postgres`. The worker connects as the `fce` role (per FCE_DATABASE_URL),
+-- which "owns" the database but has NO privileges on tables inside it by
+-- default — Postgres separates database ownership from table privileges.
+-- Without these GRANTs the worker fails at startup with
+-- `permission denied for table config`. Caught on first prod deploy.
+
+-- Grant fce full privileges on every existing table + sequence.
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO fce;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO fce;
+
+-- Default privileges: any table created by postgres via FUTURE migrations is
+-- auto-granted to fce. Prevents the same bug from recurring on the next
+-- migration (P2+, when new tables or columns get added).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO fce;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO fce;
