@@ -7,14 +7,14 @@ Wants=network-online.target
 Type=simple
 User=fce
 Group=fce
-# WorkingDirectory MUST be /opt/fce (a dir fce owns), NOT /opt/fce/embedder.
-# sentence-transformers 5.x falls back to treating the model id as a relative
-# path when Hub resolution hiccups, and reads/writes CWD-relative files during
-# load. Starting from / means those writes hit permission errors and the service
-# crash-loops. /opt/fce is fce's home dir; safe to write to.
-WorkingDirectory=/opt/fce
-# No EnvironmentFile needed — the embedder has no secrets. Model name can be
-# overridden via FCE_EMBED_MODEL if you ever swap models.
+# WorkingDirectory MUST point at the embedder dir so uvicorn finds app.py
+# (uvicorn imports "app:app" relative to CWD).
+WorkingDirectory=/opt/fce/current/embedder
+# HF_HOME tells sentence-transformers / huggingface_hub where the model cache
+# lives, so model load doesn't depend on CWD. The fce user's home is /opt/fce,
+# so the default cache path is /opt/fce/.cache/huggingface — pin it explicitly
+# to be safe (and resilient to HOME being unset under systemd).
+Environment=HF_HOME=/opt/fce/.cache/huggingface
 Environment=FCE_EMBED_MODEL=thenlper/gte-small
 ExecStart=/opt/fce/embedder/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8001
 Restart=on-failure
