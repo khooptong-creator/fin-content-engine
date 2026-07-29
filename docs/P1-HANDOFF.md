@@ -1,74 +1,121 @@
-# Phase 1 Handoff — Fin-Content Engine (updated 2026-07-28)
+# Phase 1 Handoff — Fin-Content Engine (updated 2026-07-29)
 
-**Status: code-complete + 66/66 tests green; VPS deploy IN PROGRESS (~Phase 3 of 9).**
+**Status: code-complete + 60/60 unit tests green; VPS deploy COMPLETE (worker live, public HTTPS pending one final check).**
 
-The original codebase facts (below, preserved) are unchanged. The top of this
-file tracks the deploy saga; the bottom keeps the build-handoff content.
+The original codebase facts (bottom) are unchanged. The top tracks the deploy saga.
 
 ---
 
 # DEPLOY CHAPTER (live)
 
-## Deploy architecture (revised mid-deploy)
+## Deploy architecture (as built)
 
-**Original plan:** Railway + cloud Supabase. **Revised:** self-hosted bare
-process on a VPS co-located with the trading desk. Drivers: Railway cost;
-Supabase edge function OOM-killed on the free tier.
+Self-hosted bare process on the VPS (`desk.lamkalabs.com`, IP `160.250.204.73`),
+co-located with the trading desk. Zero external cloud dependencies in P1.
 
-**Final topology (in progress):**
-- **Worker** → `127.0.0.1:8002` (systemd unit `fce-worker.service`)
-- **Embedder** → `127.0.0.1:8001` (systemd unit `fce-embedder.service`, local gte-small)
-- **Postgres 16 + pgvector** → host Postgres on `127.0.0.1:5433` (the `fce` DB)
-- **Caddy** → **the existing `desk-caddy-1` container** (NOT a new Caddy) serves
-  `fce.lamkalabs.com` and proxies to 8002
-- **No Supabase in P1.** Replaced by local embedder. Supabase returns in P3 for GUI auth.
+| Component | Where | Port | Notes |
+|---|---|---|---|
+| **Worker** (FastAPI + APScheduler) | systemd `fce-worker.service` | `0.0.0.0:8002` | Caddy reaches via Docker bridge `172.18.0.1:8002` |
+| **Embedder** (sentence-transformers gte-small) | systemd `fce-embedder.service` | `127.0.0.1:8001` | Local; replaces Supabase edge fn |
+| **Postgres 16 + pgvector** | host Postgres | `127.0.0.1:5433` | Desk's Timescale owns 5432; host auto-bumped |
+| **Caddy** (TLS terminator) | `desk-caddy-1` Docker container | `:80/:443` | Existing desk container; we added one vhost |
 
-**Why each port:**
-- 5432 = trading desk's TimescaleDB (Docker). Host Postgres auto-bumped to 5433.
-- 8000 = trading desk's `desk-api` (Docker). Our worker can't use it.
-- 8001 = our embedder. 8002 = our worker. Free ports, no conflicts.
-- 443 = trading desk's Caddy container. We add a vhost to it, not a competing Caddy.
+**Domain:** `fce.lamkalabs.com` → `160.250.204.73` (Porkbun/Cloudflare A record).
 
-## Deploy progress
+## Deploy progress (all phases done)
 
-| Phase | Status | Notes |
-|---|---|---|
-| 0.1 SSH as root | ✅ Done | `ssh root@160.250.204.73`, username is `root` (not `khooptong`) |
-| 0.2 GitHub repo | ✅ Done | `khooptong-creator/fin-content-engine` (private). Push of the embedder commit required `gh auth setup-git` after switching `gh` CLI to creator account. |
-| 0.3 Supabase edge fn | ❌ DROPPED | OOM-killed (`EarlyDrop`, ~10MB ceiling). Replaced with local embedder (Option C). |
-| 1 apt install | ✅ Done | postgresql-16, postgresql-16-pgvector, python3.12, caddy (later: not used — desk Caddy instead), git, curl |
-| 2 fce user + repo | ✅ Done | `/opt/fce` with `current` symlink → `releases/initial`; embedder pulled via `sudo -u fce git -C /opt/fce/current pull` |
-| 3 Postgres + pgvector | ✅ Done | `fce` role + DB + `vector` extension on **port 5433** (NOT 5432 — Timescale owns it). Password set via `ALTER ROLE` inside psql. **Password stored at `F:\Content Creation Project\FCESupa DB PW.txt` locally.** Currently `testpassword123` (diagnostic) — must be changed before .env. |
-| 4 venvs (worker + embedder) | ⬜ Not done | Next after the port conflict is resolved |
-| 5 migrations | ⬜ Not done | |
-| 6 .env | ⬜ Not done | Must use port **5433** and embedder URL **127.0.0.1:8001** |
-| 7 systemd units | ⬜ Not done | Worker on **8002**, not 8000 |
-| 8 Caddy/TLS | ⬜ Not done | Add vhost to `desk-caddy-1`, NOT a new Caddy |
-| 9 verify | ⬜ Not done | |
+| Phase | Status |
+|---|---|
+| 0.1 SSH as root | ✅ |
+| 0.2 GitHub repo (`khooptong-creator/fin-content-engine`) | ✅ |
+| 0.3 ~~Supabase edge fn~~ → local embedder (Option C) | ✅ (swapped) |
+| 1 apt install (postgres, python, git, curl) | ✅ |
+| 2 fce user + `/opt/fce` + repo cloned | ✅ |
+| 3 Postgres `fce` DB + pgvector on **port 5433** | ✅ |
+| 4 venvs (worker + embedder) + gte-small model | ✅ |
+| 5 migrations (15 tables, 12 sources, 4 config) | ✅ |
+| 6 `.env` (port 5433, embedder 8001) | ✅ |
+| 7 systemd units (embedder 8001 + worker 8002) | ✅ |
+| 7.3 live ingest verified (50 items fetched+embedded, `/stats` clean) | ✅ |
+| 8 Caddy vhost appended to `/opt/desk/Caddyfile` + reloaded | ✅ |
+| 9 public HTTPS `/health` over `https://fce.lamkalabs.com` | ⏳ pending final curl |
 
-## Current blocker (2026-07-28)
+## Live-ingest proof (2026-07-29)
 
-The trading desk runs as a Docker Compose stack claiming ports 5432 (Timescale),
-8000 (desk-api), 443/80 (desk-caddy). Our original runbook assumed we'd install a
-fresh Caddy and bind 8000/5432 — all three collide. Before resuming Phase 4, we
-need to **see the desk's `docker-compose.yml`** to add a vhost to the existing
-Caddy (the only additive change that won't break the desk). Awaiting user input.
+Manual trigger of ET Markets source:
+```
+{"fetched":50,"new":50,"embedded":50,"embed_failures":0,"status":"ok"}
+```
+`/stats`: `items.total=50, with_embedding=50, without_embedding=0, orphaned=0, embedding_health=ok`.
+Full chain (RSS → parse → dedup → embed → DB) operational.
+
+## Bugs found and fixed during deploy (the real list)
+
+Each of these was a real failure that blocked the deploy. All are fixed in the
+codebase now; the migration-level ones are in the migrations, the code ones are
+in the worker modules. Listed in order encountered, with the one-line root cause
+and the fix that landed.
+
+### D1 — Supabase edge function OOM-killed
+- **Symptom:** `EarlyDrop` in Supabase logs, 502 from the function, ~10MB memory ceiling hit.
+- **Root cause:** Supabase's free-tier edge function runtime can't load gte-small in memory.
+- **Fix:** Replaced with local embedder service (`embedder/app.py`, systemd unit). Self-hosted gte-small via `sentence-transformers`; 8GB VPS RAM has no ceiling. Decision: Option C.
+- **Code:** `embedder/` (new), `.env.example` updated.
+
+### D2 — Host Postgres on port 5433, not 5432
+- **Symptom:** `psql -h 127.0.0.1` failed auth; `ss -tlnp` showed `docker-proxy` on 5432.
+- **Root cause:** Trading desk's TimescaleDB container owns 5432; Ubuntu's Postgres auto-bumped to 5433 on install.
+- **Fix:** All `psql` commands, the `.env` `FCE_DATABASE_URL`, and the runbook use port 5433. No code change needed (port is in the connection string).
+
+### D3 — DB password contained URL-special characters
+- **Symptom:** `failed to resolve host 'ssw0rd…'` at worker startup — Postgres URL parser saw `pass` as password and `word@127.0.0.1` as host.
+- **Root cause:** Password had an `@` (URL separator between userinfo and host). psycopg3 parses the connection string per RFC 3986.
+- **Fix:** Changed the `fce` role's password to URL-safe chars (letters+digits+hyphens+underscores only). Updated runbook password guidance.
+- **Lesson:** connection-string passwords must avoid `@ : / ? # %`. Worth a `.env.example` comment.
+
+### D4 — `permission denied for table config` at worker startup
+- **Symptom:** `psycopg.errors.InsufficientPrivilege` on the first `SELECT FROM config`.
+- **Root cause:** Migrations ran as the `postgres` superuser, so every table was owned by `postgres`. The `fce` role "owns" the database but Postgres separates DB ownership from table privileges — `fce` had no privileges on the tables inside.
+- **Fix:** Added `GRANT ALL PRIVILEGES ON ALL TABLES/SEQUENCES` + `ALTER DEFAULT PRIVILEGES` to `001_init.sql`. The `ALTER DEFAULT PRIVILEGES` lines ensure future migrations (P2+) auto-grant to `fce`, preventing recurrence.
+- **Code:** `supabase/migrations/001_init.sql` (GRANT block at end).
+
+### D5 — Lambda wrappers broke the async-def registry invariant
+- **Symptom:** `RuntimeError: registry invariant violated: job 'poll_rss' fn is not async def`.
+- **Root cause:** `build_job_specs()` wrapped async calls in lambdas (`fn=lambda: run_all_sources(...)`). A `lambda` is never a coroutine function — `inspect.iscoroutinefunction(lambda: ...)` returns `False` — so the decision-#22 invariant correctly rejected them. The unit tests missed it because they used real `async def` functions, not lambdas.
+- **Fix:** Replaced lambdas with explicit `async def` wrappers in `build_job_specs()`. Added a regression test (`test_lambda_rejected_even_if_it_calls_async`) that proves the invariant catches this class of bug.
+- **Code:** `worker/app/scheduler.py`, `worker/tests/test_scheduler.py`.
+
+### D6 — sentence-transformers loader treated model id as relative path
+- **Symptom:** `PermissionError: [Errno 13] Permission denied: 'thenlper/gte-small/modules.json'` when loading the model.
+- **Root cause:** sentence-transformers 5.x falls back to treating the model id as a relative local path when Hub resolution hiccups, and reads/writes CWD-relative files during load. Running from `/root` (root's CWD under `sudo -u fce`) hit permission errors.
+- **Fix:** Pinned `HF_HOME=/opt/fce/.cache/huggingface` in the systemd unit so the model loads from cache regardless of CWD. WorkingDirectory kept at `/opt/fce/current/embedder` (where `app.py` lives) so uvicorn finds the app.
+- **Code:** `embedder/fce-embedder.service`.
+
+### D7 — Deprecated `get_sentence_embedding_dimension`
+- **Symptom:** FutureWarning at model load; would break in a future sentence-transformers release.
+- **Root cause:** sentence-transformers 5.x renamed the method to `get_embedding_dimension`.
+- **Fix:** Use the new name with `getattr` fallback to the old one for forward/back compat.
+- **Code:** `embedder/app.py`.
+
+### D8 — Git credential mismatch (`khooptong-sudo` vs `khooptong-creator`)
+- **Symptom:** `git push` 403 "Permission denied" — authenticating as `sudo`, repo owned by `creator`.
+- **Root cause:** Two separate GitHub accounts; Windows Credential Manager cached `sudo`'s token. Switching `gh` CLI account doesn't fix the credential helper (separate stores).
+- **Fix:** User switched the `gh` CLI auth; push ultimately worked. Long-term: pick one canonical account.
+- **Not a code bug** — environment/credential issue.
+
+### D9 — Accidental commit of `FCESupa DB PW.txt` (security)
+- **Symptom:** Password file staged in the commit.
+- **Root cause:** Local notes file in the repo root, not gitignored.
+- **Fix:** Scrubbed via `git commit --amend` before push (commit was local-only). `.gitignore` hardened (`*PW*.txt`, `*password*.txt`, `*secret*.txt`, `FCESupa*.txt`). No leak — the Supabase password is moot anyway since we dropped Supabase in P1.
 
 ## Decisions made during deploy
 
-1. **Bare process, not Docker** (worker + embedder). Avoids Docker-to-host-Postgres networking footgun; systemd is a better supervisor for one Python process than a container.
-2. **Self-host Postgres on the VPS** (Option C). Cloud Supabase free tier has pause-on-inactivity + egress caps; local is faster, free, fully controlled.
-3. **Self-host embeddings** (Option C). Supabase's hosted gte-small OOM-killed; local sentence-transformers on 8GB RAM has no such ceiling.
-4. **Share the box with the trading desk**, isolated via dedicated `fce` user + separate DB + separate services. Resource contention risk accepted (worker is tiny).
+1. **Bare process, not Docker** (worker + embedder). systemd is a better supervisor for one Python process; avoids Docker-to-host-Postgres networking footgun.
+2. **Self-host Postgres on the VPS** (Option C). Cloud Supabase free tier has pause-on-inactivity + egress caps; local is faster, free, controlled.
+3. **Self-host embeddings on the VPS** (Option C). Supabase hosted gte-small OOM-killed; local sentence-transformers has no ceiling.
+4. **Share the box with the trading desk**, isolated via dedicated `fce` user + separate DB + separate services.
 5. **Co-locate behind the desk's existing Caddy** rather than running a second Caddy. Can't run two Caddys on 443.
-6. **Git credential note:** `khooptong-sudo` and `khooptong-creator` are two separate GitHub accounts; git push must authenticate as `creator`. Switching `gh` CLI account alone doesn't fix Windows Credential Manager — required `gh auth setup-git`.
-7. **Security incident (resolved):** the local file `FCESupa DB PW.txt` was accidentally committed to git. Scrubbed via `git commit --amend` before push; `.gitignore` hardened. The commit was local-only before amend, so no leak. The Supabase DB password in it is moot (we dropped Supabase in P1).
-
-## Open risks for resume
-
-- **Host Postgres on 5433** is unconventional; if the box reboots and something else grabs 5433 first, we have a problem. Mitigation: pin the port explicitly in `postgresql.conf` (worth confirming it survives reboots).
-- **Trading desk Caddy reload** — adding our vhost requires editing the desk's compose/Caddyfile and reloading. Brief blip on the desk's TLS during reload. Need to confirm the desk's Caddy is configured for graceful reload.
-- **Password for `fce`** — currently `testpassword123` (from the diagnostic). Must be changed to a real strong password before the `.env` is written.
+6. **Worker binds `0.0.0.0:8002`** (not `127.0.0.1`) so the desk-caddy Docker container can reach it via the bridge gateway `172.18.0.1`. ufw (only 22/80/443 open) blocks external access; only Caddy can get in. Safe.
 
 ---
 
@@ -76,22 +123,19 @@ Caddy (the only additive change that won't break the desk). Awaiting user input.
 
 ## What's done (codebase)
 
-### Code (33 files)
-- **Migrations (5):** full unified schema (15 tables), RLS (resilient — skips on local vanilla Postgres), seed sources + config, owner-swap stub, indexes. Applied and verified against Docker `pgvector/pgvector:pg16`.
-- **Edge function:** `supabase/functions/embed/index.ts` — wraps Supabase's built-in gte-small, 384-dim (kept for reference; not used in P1 after the Option C swap).
-- **Embedder:** `embedder/app.py` + `pyproject.toml` + `fce-embedder.service` — local gte-small service (Option C, replaces Supabase edge fn).
-- **Worker (13 modules):** `settings`, `config`, `db`, `audit`, `embed`, `ingest`, `cluster`, `scheduler`, `routes`, `main`, sources (`base`, `canonicalize`, `rss`, `edgar`, `nse`).
-- **Tests (8 files, 66 tests):** unit + integration.
-- **Fixtures:** adversarial 30-item clustering set with real gte-small embeddings.
+### Code
+- **Migrations (5):** full unified schema (15 tables), RLS (resilient), seed sources + config, owner-swap stub, indexes. **+ GRANT block (D4).**
+- **Embedder:** `embedder/app.py` + `pyproject.toml` + `fce-embedder.service` — local gte-small service (Option C).
+- **Worker (13 modules).** Includes the lambda→async-def fix (D5).
+- **Tests (8 files).** 60 unit + 7 integration.
 
 ### What the suite proves
 - Exact dedup = 0.
 - Near-dupe clustering passes §5.3 gate: FP=0, P=1.0, R=0.64 at 0.92.
-- The trap pairs hold: TCS-Q2 vs TCS-buyback stay separate; RBI-Oct vs RBI-Feb stay separate.
-- Cold-start idempotency: second ingest cycle inserts zero new items, zero orphans.
-- The `async def` registry invariant is syntax-enforced.
+- Cold-start idempotency: second ingest cycle inserts zero new items.
+- The `async def` registry invariant is syntax-enforced (and now regression-tested against lambdas — D5).
 
-## Bugs found and fixed during the build
+## Build-phase bugs (the original 10, pre-deploy)
 
 1. **psycopg3 vs asyncpg API mismatch.** Fixed via `_fetchone`/`_fetchall`/`_fetchval` helpers.
 2. **Pool configure callback leaving transactions open.** Fixed: only `register_vector_async` + `row_factory`.

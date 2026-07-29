@@ -6,7 +6,7 @@
 
 **Project:** AI pipeline for compliant US/India finance content (X + IG).
 **Owner:** UMinkoo (sole publish authority).
-**Started:** 2026-07-25. **Last update:** 2026-07-28.
+**Started:** 2026-07-25. **Last update:** 2026-07-29.
 
 ---
 
@@ -19,8 +19,7 @@ publishes without your click. You are the editor-in-chief of a newsroom staffed
 by three cheap, tireless LLMs.
 
 **Codename:** The Cyborg Desk.
-**Source of truth:** `fin-content-engine-FINAL-blueprint.md` (the reconciled
-blueprint; everything else defers to it).
+**Source of truth:** `fin-content-engine-FINAL-blueprint.md`.
 **Phase map:** blueprint Part I §6 (P0 through P6).
 
 ---
@@ -28,65 +27,98 @@ blueprint; everything else defers to it).
 ## Non-negotiables (governs every phase)
 
 1. **Never auto-publish.** Your approval click is the compliance backstop AND what keeps you the genuine author.
-2. **Compliance wall.** Educator + analyst + commentator, NEVER advisor. Three-layer gate (L1 regex / L2 cross-model judge / L3 human). No links in X post bodies (the $0.20 URL tax). Meter mention-reads.
-3. **No trading-signal overlap.** Different universe, different regulator posture. Co-located on the same VPS but fully isolated (separate DB, separate user, separate services).
+2. **Compliance wall.** Educator + analyst + commentator, NEVER advisor. Three-layer gate (L1 regex / L2 cross-model judge / L3 human).
+3. **No trading-signal overlap.** Co-located on the same VPS but fully isolated (separate DB on port 5433, separate `fce` user, separate services).
 4. **Resist a third automated LLM layer.** Two models + human is the right depth.
 
 ---
 
-## Where we are (2026-07-28)
+## Where we are (2026-07-29)
 
-**Phase 1 (Spine + Reader) — code complete, deploy in progress.**
+**Phase 1 (Spine + Reader) — DEPLOYED. Worker live on the VPS.**
 
-- Codebase: 33 files, 66/66 tests green.
-- Clustering acceptance: FP=0, P=1.0, R=0.64 at threshold 0.92.
-- Deploy: SSH ✅, GitHub ✅, VPS package install ✅, `fce` user + repo ✅, Postgres+pgvector on port 5433 ✅.
-- **Current blocker:** trading desk Docker stack owns ports 5432/8000/443. Need the desk's `docker-compose.yml` to add a Caddy vhost without breaking it.
-- Next: venvs → migrations → .env → systemd units → Caddy vhost → verify → 24h soak.
-
-See `docs/P1-HANDOFF.md` (deploy saga) and `PROGRESS.md` (canonical status).
+- Codebase: 60/60 unit tests green; live ingest verified (50 items fetched + embedded in one trigger).
+- Deploy: all 9 phases done except the final public-HTTPS curl.
+- Topology: bare process worker + embedder, host Postgres, behind the desk's Caddy.
+- See `docs/P1-HANDOFF.md` (full deploy saga + bug list), `PROGRESS.md` (canonical status).
 
 ---
 
 ## Architecture decisions that won't change
 
-- **Self-host everything in P1.** No Railway, no Supabase, no cloud DB, no cloud embeddings. Zero external dependencies. (Supabase returns in P3 for GUI auth.)
-- **Bare process, not Docker** for worker + embedder. systemd supervises; avoids Docker-to-host-Postgres networking footgun.
-- **Host Postgres 16 + pgvector on port 5433.** Timescale owns 5432; Ubuntu's Postgres auto-bumped.
-- **Local embedder (Option C):** ~40-line FastAPI app wrapping `sentence-transformers/gte-small`, on `127.0.0.1:8001`. Replaces the Supabase edge function that OOM-killed on the free tier.
-- **Worker on port 8002.** Embedder on 8001. (Trading desk's `desk-api` owns 8000.)
+- **Self-host everything in P1.** No Railway, no Supabase, no cloud DB, no cloud embeddings. Zero external dependencies.
+- **Bare process, not Docker** for worker + embedder. systemd supervises.
+- **Host Postgres 16 + pgvector on port 5433.** Timescale owns 5432; Ubuntu auto-bumped.
+- **Local embedder (Option C):** `embedder/app.py` + systemd unit, `127.0.0.1:8001`, gte-small via sentence-transformers.
+- **Worker on `0.0.0.0:8002`.** Caddy reaches via Docker bridge gateway `172.18.0.1`. ufw (22/80/443 only) blocks external.
 - **Co-located with trading desk**, isolated via dedicated `fce` user + separate DB + separate systemd services.
-- **Behind the trading desk's existing Caddy** (`desk-caddy-1`) for TLS — can't run two Caddys on 443.
+- **Behind the trading desk's existing Caddy** (`desk-caddy-1`) — additive vhost, not a second Caddy.
 - **Two-tier config:** env vars for secrets/structure, `config` table for tuning.
-- **All jobs `async def`**, asserted at registration (decision #22).
+- **All jobs `async def`**, asserted at registration (decision #22). Regression-tested against lambda wrappers.
 - **FP ceiling ≤2** is the load-bearing clustering criterion (decision #23).
+- **Clustering threshold 0.92** (not the spec's 0.78 guess) — empirically tuned.
 
 ---
 
 ## VPS access
 
 - **Host:** `160.250.204.73` (SSH as `root`).
-- **Domain:** `fce.lamkalabs.com` (DNS A record → 160.250.204.73, via Porkbun/Cloudflare).
+- **Public domain:** `fce.lamkalabs.com` (DNS A record via Porkbun/Cloudflare).
 - **Trading desk hostname:** `desk.lamkalabs.com` (same box).
-- **fce DB password:** stored locally at `F:\Content Creation Project\FCESupa DB PW.txt` (currently `testpassword123` — change before .env).
+- **fce DB password:** URL-safe (letters+digits+hyphens+underscores only — never `@:/?#%`). Stored locally at `F:\Content Creation Project\FCESupa DB PW.txt`.
+- **Ports:** worker 8002, embedder 8001, Postgres 5433. Trading desk owns 5432/8000/443.
+
+## Day-to-day ops (on the VPS, as root)
+
+```bash
+# Check services
+systemctl status fce-worker --no-pager
+systemctl status fce-embedder --no-pager
+
+# Health + stats
+curl http://127.0.0.1:8002/health
+curl http://127.0.0.1:8002/stats
+curl https://fce.lamkalabs.com/health     # public
+
+# Update code after a change
+sudo -u fce git -C /opt/fce/current pull
+systemctl restart fce-worker
+systemctl restart fce-embedder            # only if embedder code changed
+
+# Logs
+journalctl -u fce-worker -f
+journalctl -u fce-embedder -f
+
+# Reload Caddy after Caddyfile change
+docker exec desk-caddy-1 caddy validate --config /etc/caddy/Caddyfile
+docker exec desk-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+```
 
 ---
 
 ## GitHub
 
 - **Repo:** `khooptong-creator/fin-content-engine` (private).
-- **Auth gotcha:** `khooptong-sudo` and `khooptong-creator` are two separate accounts. Push must authenticate as `creator`. Switching `gh` CLI alone doesn't fix Windows Credential Manager — `gh auth setup-git` after switching, or transfer repo ownership to sudo.
-- **Security note:** `FCESupa DB PW.txt` was accidentally committed once; scrubbed via `git commit --amend` before push; `.gitignore` hardened (`*PW*.txt`, `*password*.txt`, etc.).
+- **Auth gotcha:** `khooptong-sudo` and `khooptong-creator` are two separate accounts. Push must authenticate as `creator`.
+- **Security:** `FCESupa DB PW.txt` was accidentally committed once; scrubbed via `git commit --amend` before push; `.gitignore` hardened.
 
 ---
 
 ## Known bugs that recurred (avoid re-discovering)
 
-1. **psycopg3 ≠ asyncpg.** `conn.fetchrow` / `$1` placeholders / `set_row_factory` don't exist in psycopg3. Use `%s` placeholders, the cursor pattern, `row_factory` as a settable property. Helpers in `db.py`: `_fetchone` / `_fetchall` / `_fetchval`.
-2. **Pool configure callback must not leave transactions open.** Don't run `CREATE EXTENSION` or `SET` inside `_configure_conn`; only `register_vector_async` + `row_factory`.
-3. **Windows + psycopg3 needs `WindowsSelectorEventLoopPolicy`** (ProactorEventLoop incompatible). Set in `conftest.py`. Deprecated in Python 3.16 — will need rework.
-4. **APScheduler 3.11 drift:** `AsyncIOExecutor()` takes no `max_workers` arg; `_job_defaults` is a dict; use `inspect.iscoroutinefunction` (not `asyncio.`).
-5. **Clustering threshold 0.92, not 0.78.** gte-small's in-domain baseline cosine is ~0.79; the spec's 0.78 guess merges everything. Tuned via the §5 fixture sweep.
+### Build phase (pre-deploy)
+1. **psycopg3 ≠ asyncpg.** Use `%s` placeholders (not `$1`), cursor pattern, `row_factory` as a property. Helpers: `_fetchone`/`_fetchall`/`_fetchval`.
+2. **Pool configure callback must not leave transactions open.** Only `register_vector_async` + `row_factory`.
+3. **Windows + psycopg3 needs `WindowsSelectorEventLoopPolicy`** (deprecated in 3.16).
+4. **APScheduler 3.11 drift:** `AsyncIOExecutor()` takes no `max_workers`; `_job_defaults` is a dict; use `inspect.iscoroutinefunction`.
+5. **Clustering threshold 0.92, not 0.78.** gte-small's in-domain baseline cosine is ~0.79.
+
+### Deploy phase
+6. **DB password must be URL-safe** (no `@:/?#%`) — psycopg3 parses the connection string per RFC 3986.
+7. **Migrations run as `postgres` → tables owned by `postgres` → worker as `fce` gets `permission denied`.** Fix: GRANT block in `001_init.sql` + `ALTER DEFAULT PRIVILEGES`.
+8. **Lambda wrappers break the async-def invariant.** `inspect.iscoroutinefunction(lambda: ...)` is `False`. Use explicit `async def` wrappers in `build_job_specs()`.
+9. **sentence-transformers loader needs `HF_HOME` pinned** in the systemd unit, or it treats the model id as a relative path and fails on permissions.
+10. **Host Postgres on 5433, not 5432** — Timescale owns 5432; every `psql`/`.env` must use `-p 5433`.
 
 ---
 
@@ -105,7 +137,7 @@ See `docs/P1-HANDOFF.md` (deploy saga) and `PROGRESS.md` (canonical status).
 ## How to resume
 
 1. Read `PROGRESS.md` for canonical status.
-2. Read `docs/P1-HANDOFF.md` for the deploy saga and current blocker.
+2. Read `docs/P1-HANDOFF.md` for the full deploy saga + bug list.
 3. Read `docs/P1-VPS-DEPLOY-RUNBOOK.md` for the step-by-step (Phases 0–9).
 4. Read `docs/P1-DEPLOY-SOAK-CHECKLIST.md` for the 24h soak.
 5. The blueprint (`fin-content-engine-FINAL-blueprint.md`) is the source of truth for everything after P1.

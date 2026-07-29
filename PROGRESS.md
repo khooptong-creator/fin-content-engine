@@ -8,46 +8,62 @@
 
 ## Phase status
 
-| Phase | Status | Acceptance | Notes |
-|---|---|---|---|
-| **P0 — Accounts & keys** | 🟡 Partial | — | GitHub ✅, Supabase ❌ (dropped in P1), Anthropic ⬜ (not needed until P2), Railway ❌ (dropped — using VPS), X/Meta ⬜ (not needed until P4) |
-| **P1 — Spine + Reader** | 🟡 Code done, deploy in progress | automated gates ✅ (66/66 tests); 24h soak ⬜ | see `docs/P1-HANDOFF.md` for the deploy saga |
-| **P2 — Brain + Gate** | ⬜ Not started | — | handoff prompt in blueprint §10 |
-| **P2.5 — Newsletter + Funnel** | ⬜ Not started | — | |
-| **P3 — Cockpit (GUI)** | ⬜ Not started | — | Next.js (provisional) |
-| **P4 — Publishers** | ⬜ Not started | — | |
-| **P5 — Reply engine** | ⬜ Not started | — | |
-| **P6 — Analytics & hardening** | ⬜ Not started | — | |
+| Phase | Status | Notes |
+|---|---|---|
+| **P0 — Accounts & keys** | 🟡 Partial | GitHub ✅, Supabase ❌ (dropped in P1), Anthropic ⬜ (P2), Railway ❌ (dropped — VPS), X/Meta ⬜ (P4) |
+| **P1 — Spine + Reader** | ✅ **DEPLOYED** | Worker live on VPS, live ingest verified (50 items), public HTTPS pending final curl. See `docs/P1-HANDOFF.md`. |
+| **P2 — Brain + Gate** | ⬜ Not started | handoff prompt in blueprint §10 |
+| **P2.5 — Newsletter + Funnel** | ⬜ Not started | |
+| **P3 — Cockpit (GUI)** | ⬜ Not started | Next.js (provisional) |
+| **P4 — Publishers** | ⬜ Not started | |
+| **P5 — Reply engine** | ⬜ Not started | |
+| **P6 — Analytics & hardening** | ⬜ Not started | |
 
 ---
 
-## P1 deploy sub-status (live)
+## P1 deploy sub-status (complete)
 
 | # | Step | Status |
 |---|---|---|
 | 0.1 | SSH as `root@160.250.204.73` | ✅ |
 | 0.2 | GitHub repo (`khooptong-creator/fin-content-engine`) | ✅ |
-| 0.3 | ~~Supabase edge fn~~ → local embedder (Option C) | ✅ (swapped) |
-| 1 | apt install (postgres, python, caddy, git, curl) | ✅ |
+| 0.3 | ~~Supabase edge fn~~ → local embedder (Option C) | ✅ |
+| 1 | apt install (postgres, python, git, curl) | ✅ |
 | 2 | `fce` user + `/opt/fce` + repo cloned | ✅ |
 | 3 | Postgres `fce` DB + pgvector on **port 5433** | ✅ |
-| 4 | venvs (worker + embedder) | ⬜ **next** |
-| 5 | migrations | ⬜ |
-| 6 | `.env` (port 5433, embedder 8001) | ⬜ |
-| 7 | systemd units (worker 8002, embedder 8001) | ⬜ |
-| 8 | Caddy vhost on `desk-caddy-1` (NOT a new Caddy) | ⬜ |
-| 9 | end-to-end verify | ⬜ |
+| 4 | venvs (worker + embedder) + gte-small model | ✅ |
+| 5 | migrations (15 tables, 12 sources, 4 config) | ✅ |
+| 6 | `.env` (port 5433, embedder 8001) | ✅ |
+| 7 | systemd units (embedder 8001 + worker 8002) | ✅ |
+| 7.3 | live ingest verified (50 items fetched+embedded) | ✅ |
+| 8 | Caddy vhost on `desk-caddy-1` | ✅ |
+| 9 | public HTTPS `/health` | ⏳ final curl pending |
 
-**Blocker:** trading desk Docker stack owns ports 5432 / 8000 / 443. Need to see
-the desk's `docker-compose.yml` to add our Caddy vhost without breaking the desk.
+**Live-ingest proof:** `{"fetched":50,"new":50,"embedded":50,"embed_failures":0}` from ET Markets. `/stats`: items=50, embedding_health=ok, orphaned=0.
 
 ---
 
-## Decisions log (cumulative)
+## Deploy bugs (the full list — 9 found, all fixed)
 
-| # | Decision | Date | Rationale |
+| # | Bug | Fix landed in |
+|---|---|---|
+| D1 | Supabase edge fn OOM-killed (`EarlyDrop`, 10MB ceiling) | New local embedder (`embedder/`, Option C) |
+| D2 | Host Postgres on 5433 not 5432 (Timescale owns 5432) | All `psql`/`.env` use 5433 |
+| D3 | DB password had `@` → URL parser broke (`failed to resolve host 'ssw0rd'`) | URL-safe password; runbook guidance updated |
+| D4 | Migrations owned by `postgres` → `permission denied for table config` | GRANT block in `001_init.sql` |
+| D5 | Lambda wrappers broke async-def invariant (`job 'poll_rss' fn is not async def`) | Explicit `async def` wrappers in `scheduler.py` + regression test |
+| D6 | sentence-transformers treated model id as relative path (`PermissionError`) | `HF_HOME` pinned in `fce-embedder.service` |
+| D7 | Deprecated `get_sentence_embedding_dimension` | `getattr` fallback to new `get_embedding_dimension` in `app.py` |
+| D8 | Git credential mismatch (`khooptong-sudo` vs `khooptong-creator`) | User switched `gh` auth; not a code bug |
+| D9 | `FCESupa DB PW.txt` accidentally committed | Scrubbed via `git commit --amend` pre-push; `.gitignore` hardened |
+
+---
+
+## Decisions log (cumulative — full list)
+
+| # | Decision | Phase | Rationale |
 |---|---|---|---|
-| 1 | Phase 1 = v1.0 "Spine + Reader" only | brainstorm | Each phase independently verifiable; clustering de-risks P2 |
+| 1 | Phase 1 = v1.0 "Spine + Reader" only | brainstorm | Each phase independently verifiable |
 | 2 | GUI Next.js (provisional, P3) | brainstorm | match PMS-portal muscle memory |
 | 3 | Dry-run publisher (P4) | brainstorm | develop against a log; flip env for real publish |
 | 4 | Model router config-driven | brainstorm | Kimi India access non-blocker |
@@ -76,13 +92,14 @@ the desk's `docker-compose.yml` to add our Caddy vhost without breaking the desk
 | 27 | `db_health` exempt from advisory lock | review | a probe needing the DB to acquire a lock fails for the wrong reason |
 | 28 | `embed_retry_success` audit event | review | recovery provable after the fact |
 | 29 | Auto-disabled-source check in soak | review | a source can die by auto-disabling and pass the gate invisibly |
-| 30 | HNSW≈exact caveat documented in TUNING.md | review | threshold tuned in one engine, enforced in another; benign at scale, must re-check past ~10k rows |
-| 31 | Clustering threshold 0.78 → **0.92** | build | gte-small's in-domain baseline cosine is ~0.79; 0.78 merges nearly everything |
-| 32 | Self-host Postgres on VPS (Option C) | deploy | Supabase free tier has pause-on-inactivity + egress caps; local is faster, free, controlled |
-| 33 | Self-host embeddings on VPS (Option C) | deploy | Supabase hosted gte-small OOM-killed; local sentence-transformers has no ceiling |
-| 34 | Bare process, not Docker | deploy | Docker-to-host-Postgres networking footgun; systemd is a better supervisor for one Python process |
-| 35 | Worker on port 8002, embedder on 8001 | deploy | 5432/8000/443 owned by trading desk Docker stack |
+| 30 | HNSW≈exact caveat documented in TUNING.md | review | threshold tuned in one engine, enforced in another |
+| 31 | Clustering threshold 0.78 → **0.92** | build | gte-small's in-domain baseline cosine is ~0.79 |
+| 32 | Self-host Postgres on VPS (Option C) | deploy | Supabase free tier pause + egress caps |
+| 33 | Self-host embeddings on VPS (Option C) | deploy | Supabase hosted gte-small OOM-killed |
+| 34 | Bare process, not Docker | deploy | systemd > Docker for one Python process |
+| 35 | Worker on port 8002, embedder on 8001 | deploy | 5432/8000/443 owned by trading desk |
 | 36 | Add Caddy vhost to `desk-caddy-1`, not a new Caddy | deploy | can't run two Caddys on 443 |
+| 37 | Worker binds `0.0.0.0:8002` + ufw 22/80/443 only | deploy | Caddy reaches via Docker bridge; external blocked |
 
 ---
 
@@ -95,11 +112,3 @@ the desk's `docker-compose.yml` to add our Caddy vhost without breaking the desk
 | Embeddings | $0 | local gte-small, no cloud API |
 | LLMs (P2+) | ~$5–15 | Haiku + Gemini Flash + (eventually) Kimi |
 | **Total (P1)** | **~$0** | |
-
----
-
-## Open questions / risks
-
-- Trading desk Caddy reload procedure — additive vhost shouldn't break existing sites, but reload has a brief TLS blip.
-- Host Postgres on port 5433 survives reboots? Confirm `postgresql.conf` pins it.
-- Python 3.14 deprecations (`WindowsSelectorEventLoopPolicy`, `set_event_loop_policy`, `iscoroutinefunction`) — all handled, but will need rework before 3.16.
