@@ -25,6 +25,23 @@ class TestAsyncDefInvariant:
         # Should not raise.
         register_jobs(scheduler, [spec])
 
+    def test_lambda_rejected_even_if_it_calls_async(self):
+        """Regression for a real prod bug: wrapping an async call in a lambda
+        breaks the invariant (lambdas are never coroutine functions). Caught
+        on first prod deploy after the original unit tests passed."""
+        async def real_async_fn():
+            return 42
+
+        # The lambda *calls* real_async_fn, but the lambda itself is not a
+        # coroutine function — inspect.iscoroutinefunction returns False.
+        bad_lambda = lambda: real_async_fn()  # noqa: E731
+
+        spec = JobSpec(id="lambda_job", minutes=30, fn=bad_lambda)
+        scheduler = make_scheduler()
+        with pytest.raises(RuntimeError) as exc_info:
+            register_jobs(scheduler, [spec])
+        assert "lambda_job" in str(exc_info.value)
+
     def test_sync_job_rejected_with_named_id(self):
         def bad_job():
             return 42  # plain def, not async def

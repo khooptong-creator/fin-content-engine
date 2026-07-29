@@ -50,19 +50,46 @@ _JOB_SPECS: list[JobSpec] | None = None
 async def build_job_specs() -> list[JobSpec]:
     """Construct the job specs. Imported lazily to avoid a circular import with
     ingest/cluster (which import db, which imports settings — keep this layer
-    free of those until the scheduler actually starts)."""
+    free of those until the scheduler actually starts).
+
+    IMPORTANT: every fn here MUST be declared `async def` (either directly or
+    via the explicit wrappers below). Do NOT use `lambda` — `lambda` is never a
+    coroutine function, so `inspect.iscoroutinefunction(lambda: ...)` is False,
+    and register_jobs' async-def invariant (decision #22) correctly rejects it.
+    This bug surfaced on first prod deploy after the unit tests passed (the
+    tests used real async-def functions, not lambdas)."""
     from app.cluster import cluster_new_items, embed_retry_sweep
     from app.config import get_ingest_config
     from app.ingest import run_all_sources
     from app.db import ping as db_ping
 
     cfg = await get_ingest_config()
+
+    # Explicit async wrappers — NOT lambdas. Each is a real coroutine function
+    # that inspect.iscoroutinefunction accepts. Partial wouldn't work either
+    # (also not a coroutine function); a named async def is the only form that
+    # satisfies both the invariant and APScheduler's AsyncIOExecutor.
+    async def poll_rss() -> None:
+        await run_all_sources(kind="rss")
+
+    async def poll_edgar() -> None:
+        await run_all_sources(kind="edgar")
+
+    async def poll_nse() -> None:
+        await run_all_sources(kind="nse")
+
+    async def cluster_job() -> None:
+        await cluster_new_items()
+
+    async def embed_retry_job() -> None:
+        await embed_retry_sweep()
+
     return [
-        JobSpec(id="poll_rss", minutes=cfg.rss_poll_minutes, fn=lambda: run_all_sources(kind="rss")),
-        JobSpec(id="poll_edgar", minutes=cfg.edgar_poll_minutes, fn=lambda: run_all_sources(kind="edgar")),
-        JobSpec(id="poll_nse", minutes=cfg.nse_poll_minutes, fn=lambda: run_all_sources(kind="nse")),
-        JobSpec(id="cluster_new", minutes=15, fn=lambda: cluster_new_items()),
-        JobSpec(id="embed_retry", minutes=30, fn=lambda: embed_retry_sweep()),
+        JobSpec(id="poll_rss", minutes=cfg.rss_poll_minutes, fn=poll_rss),
+        JobSpec(id="poll_edgar", minutes=cfg.edgar_poll_minutes, fn=poll_edgar),
+        JobSpec(id="poll_nse", minutes=cfg.nse_poll_minutes, fn=poll_nse),
+        JobSpec(id="cluster_new", minutes=15, fn=cluster_job),
+        JobSpec(id="embed_retry", minutes=30, fn=embed_retry_job),
         # db_health exempt from advisory lock — the probe must work when the DB
         # is degraded, exactly the condition a lock-acquire failure would mimic.
         JobSpec(id="db_health", minutes=5, fn=db_ping, lock=False),
