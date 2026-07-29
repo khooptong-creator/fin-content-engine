@@ -17,16 +17,17 @@ database, and two separate systemd services (worker + embedder).
                            │
                            ▼
             ┌──────────────────────────────┐
-            │  Caddy  (TLS for fce.lamkalabs.com)
-            │  → 127.0.0.1:8000 (worker)   │
+            │  desk-caddy-1 (Docker)        │
+            │  TLS for fce.lamkalabs.com    │
+            │  → 172.18.0.1:8002 (worker)   │
             └──────────────────────────────┘
-                           │ localhost
+                           │ Docker bridge gateway
         ┌──────────────────┼──────────────────┐
         ▼                  ▼                  ▼
    ┌─────────┐      ┌──────────────┐    ┌──────────────┐
    │ worker  │ ───→ │  embedder    │    │  Postgres 16 │
-   │ :8000   │ ───→ │  :8001       │    │  + pgvector  │
-   │ systemd │      │  gte-small   │    │  db: fce     │
+   │ :8002   │ ───→ │  :8001       │    │  + pgvector  │
+   │ systemd │      │  gte-small   │    │  :5433, db:fce│
    └─────────┘      └──────────────┘    └──────────────┘
 ```
 
@@ -108,10 +109,15 @@ say yes.
 
 ### 1.2 Install the packages we need
 ```bash
-apt install -y postgresql-16 postgresql-16-pgvector python3.12 python3.12-venv caddy git curl
+apt install -y postgresql-16 postgresql-16-pgvector python3.12 python3.12-venv git curl
 ```
 **What:** installs Postgres 16 + the pgvector extension, Python 3.12 + venv
-support, the Caddy web server (handles TLS automatically), git, and curl.
+support, git, and curl.
+
+> **Note on Caddy:** we do **NOT** install Caddy via apt. The trading desk
+> already runs Caddy in a Docker container (`desk-caddy-1`) that owns ports
+> 80/443 for the whole box. We add our site to *its* Caddyfile in Phase 8 —
+> installing a second Caddy would conflict on the ports.
 **Verify each:**
 ```bash
 psql --version               # should say 16.x
@@ -211,6 +217,13 @@ psql "postgresql://fce:<DB_PASSWORD>@127.0.0.1:5432/fce" -c "SELECT extname FROM
 ```
 Should list `vector` (and `plpgsql`). **Save `<DB_PASSWORD>` somewhere safe.**
 
+> **PORT NOTE (discovered during deploy):** the trading desk's TimescaleDB owns
+> port 5432, so the host Postgres auto-bumped to **5433**. Every TCP connection
+> to the `fce` DB must use port 5433, not 5432. Confirm:
+> ```bash
+> PGPASSWORD='<DB_PASSWORD>' psql -U fce -h 127.0.0.1 -p 5433 -d fce -c "SELECT extname FROM pg_extension;"
+> ```
+
 ### 3.3 (Optional but recommended) Light tuning for 8GB RAM
 ```bash
 tee /etc/postgresql/16/main/conf.d/fce-tuning.conf >/dev/null <<'EOF'
@@ -289,6 +302,9 @@ default routes.)
 
 **Where:** SSH'd into the VPS.
 
+**Port note:** the host Postgres runs on **5433** (the trading desk's Timescale
+owns 5432). Every `psql` command in this phase needs `-p 5433`.
+
 ```bash
 for f in /opt/fce/current/supabase/migrations/001_init.sql \
          /opt/fce/current/supabase/migrations/002_rls.sql \
@@ -296,22 +312,23 @@ for f in /opt/fce/current/supabase/migrations/001_init.sql \
          /opt/fce/current/supabase/migrations/004_set_owner.sql \
          /opt/fce/current/supabase/migrations/005_indexes.sql; do
     echo "=== applying $f ==="
-    sudo -u postgres psql -d fce -v ON_ERROR_STOP=1 -f "$f"
+    sudo -u postgres psql -p 5433 -d fce -v ON_ERROR_STOP=1 -f "$f"
 done
 ```
-**What:** runs all five migrations in order. `ON_ERROR_STOP=1` means if any one
-fails, it stops immediately (rather than silently leaving a half-built schema).
+**What:** runs all five migrations in order against the host Postgres on 5433.
+`ON_ERROR_STOP=1` means if any one fails, it stops immediately (rather than
+silently leaving a half-built schema).
 **Verify:**
 ```bash
-sudo -u postgres psql -d fce -c "\dt"
+sudo -u postgres psql -p 5433 -d fce -c "\dt"
 ```
 Should list 15 tables (`sources`, `items`, `stories`, ... `evergreen_bank`).
 ```bash
-sudo -u postgres psql -d fce -c "SELECT count(*) FROM sources;"
+sudo -u postgres psql -p 5433 -d fce -c "SELECT count(*) FROM sources;"
 ```
 Should say `12`. And:
 ```bash
-sudo -u postgres psql -d fce -c "SELECT count(*) FROM config;"
+sudo -u postgres psql -p 5433 -d fce -c "SELECT count(*) FROM config;"
 ```
 Should say `4`.
 
@@ -325,7 +342,7 @@ Should say `4`.
 
 ```bash
 tee /opt/fce/.env >/dev/null <<'EOF'
-FCE_DATABASE_URL=postgresql://fce:<DB_PASSWORD>@127.0.0.1:5432/fce
+FCE_DATABASE_URL=postgresql://fce:<DB_PASSWORD>@127.0.0.1:5433/fce
 FCE_EDGAR_USER_AGENT=Fin-Content Engine fin-content@lamkalabs.com (Your Name)
 FCE_EMBEDDING_EDGE_FUNCTION_URL=http://127.0.0.1:8001/embed
 FCE_EMBED_MOCK=false
@@ -336,8 +353,13 @@ chown fce:fce /opt/fce/.env
 chmod 600 /opt/fce/.env
 ```
 **Replace before pasting:**
-- `<DB_PASSWORD>` — the password you set in Phase 3.2
+- `<DB_PASSWORD>` — the **real** password for the `fce` DB role (set in Phase 3.2;
+  if you used the diagnostic `testpassword123`, change it to a strong one first via
+  `sudo -u postgres psql -p 5433 -c "ALTER ROLE fce WITH PASSWORD '<new>';"`)
 - `(Your Name)` — your actual name (EDGAR requires a human-readable UA)
+
+**Port note:** `5433`, NOT `5432`. The trading desk's Timescale owns 5432; our
+host Postgres is on 5433.
 
 **Note:** no Supabase values in P1. Embeddings point at the local embedder
 service (`127.0.0.1:8001`), which we set up in Phase 4.2 and start in Phase 7.
@@ -403,7 +425,11 @@ User=fce
 Group=fce
 WorkingDirectory=/opt/fce/current/worker
 EnvironmentFile=/opt/fce/.env
-ExecStart=/opt/fce/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+# Port 8002 (NOT 8000 — the trading desk's desk-api owns 8000).
+# Host 0.0.0.0 (NOT 127.0.0.1) so the desk-caddy Docker container can reach
+# us via the Docker bridge gateway (172.18.0.1). ufw blocks external access
+# to 8002 — only Caddy can get in. Safe.
+ExecStart=/opt/fce/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8002
 Restart=on-failure
 RestartSec=5
 
@@ -432,70 +458,99 @@ it connected to Postgres.
 
 ### 7.4 Hit the health endpoint locally
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8002/health
 ```
 **Verify:** `{"process":"up","scheduler_running":true,"db_reachable":true}`.
 **If `db_reachable` is false:** check `/opt/fce/.env` has the right DB password
-and the `fce` role exists (Phase 3.2).
+and the `fce` role exists (Phase 3.2). Also confirm the port is 5433, not 5432.
 
-✅ **End of Phase 7.** Both services are live on localhost.
+✅ **End of Phase 7.** Both services are live (embedder on 8001, worker on 8002).
 
 ---
 
-## PHASE 8 — Caddy: TLS + public domain
+## PHASE 8 — Caddy vhost (add to the trading desk's existing Caddy)
 
-**Where:** SSH'd into the VPS. Needs DNS done first.
+**Where:** SSH'd into the VPS.
 
-### 8.1 Point DNS at the box
-In your DNS provider (wherever `lamkalabs.com` is managed), add an A record:
-- **Host:** `fce` (so the full domain is `fce.lamkalabs.com`)
-- **Type:** A
-- **Value:** `160.250.204.73` (your VPS IP from the dashboard)
-- **TTL:** default
+**Critical context:** there is already a Caddy running — the trading desk's
+`desk-caddy-1` Docker container, which owns ports 80/443 for the whole box. We
+do **NOT** install a second Caddy or use the apt-installed one. We add one site
+block to the desk's existing Caddyfile and reload it inside the container.
 
-**Verify:** wait 1–5 min, then from your Windows machine:
-```cmd
-nslookup fce.lamkalabs.com
-```
-Should resolve to `160.250.204.73`. Don't proceed until it does.
+The desk's Caddyfile lives at `/opt/desk/Caddyfile` on the host (volume-mounted
+read-only into the container at `/etc/caddy/Caddyfile`). Editing the host file
+and reloading the container picks up the change.
 
-### 8.2 Write the Caddyfile
-If Caddy is already configured for other sites, **append** to the existing
-Caddyfile rather than overwriting. Check first:
+### 8.1 DNS (already done)
+`fce.lamkalabs.com → 160.250.204.73` was set up in Phase 0. Skip to 8.2.
+
+### 8.2 Append the fce site block to the desk's Caddyfile
 ```bash
-cat /etc/caddy/Caddyfile
-```
-If it has content, we add to it. If it's the default placeholder, we replace.
+tee -a /opt/desk/Caddyfile >/dev/null <<'EOF'
 
-To add the fin-content-engine site:
-```bash
-tee -a /etc/caddy/Caddyfile >/dev/null <<'EOF'
-
+# Fin-Content Engine (P1). Added 2026-07-28.
+# Caddy routes by hostname — this block only matches fce.lamkalabs.com; the
+# desk's existing {$LTT_DOMAIN} block above is untouched.
 fce.lamkalabs.com {
-    reverse_proxy 127.0.0.1:8000
+	reverse_proxy 172.18.0.1:8002
 }
 EOF
 ```
-(The leading blank line separates it from whatever's already there.)
-**What:** tells Caddy to serve `fce.lamkalabs.com`, auto-provision a Let's Encrypt
-TLS cert for it, and proxy all requests to the worker on localhost:8000.
+**What:** appends one site block to the desk's Caddyfile. The `172.18.0.1` is
+the Docker bridge gateway (verified via `docker exec desk-caddy-1 ip route`) —
+that's the host IP as seen from inside the container. `127.0.0.1` would NOT
+work here (inside the container, that's the container's loopback, not the host).
 
-### 8.3 Reload Caddy
+**Verify the append didn't corrupt the desk's existing block:**
 ```bash
-systemctl reload caddy
+cat /opt/desk/Caddyfile
 ```
-**Verify:** Caddy is green:
+You should see the desk's original `{$LTT_DOMAIN} { ... }` block intact, then
+the new `fce.lamkalabs.com { ... }` block at the bottom. If the desk's block
+looks wrong, STOP — you may have accidentally overwritten. Restore from git:
 ```bash
-systemctl status caddy
+git -C /opt/desk checkout Caddyfile
 ```
-Then, from your Windows machine (give TLS ~30s to provision on first hit):
+and try the append again more carefully.
+
+### 8.3 Validate + reload inside the container
+First validate (catches syntax errors before reloading, so we don't risk the
+desk's TLS):
+```bash
+docker exec desk-caddy-1 caddy validate --config /etc/caddy/Caddyfile
+```
+**Verify:** "Caddyfile is valid" — no errors. If it errors, fix the syntax
+before reloading; a bad Caddyfile reloads cleanly in Caddy 2 (it keeps the old
+config), but validating first is free insurance.
+
+Then reload:
+```bash
+docker exec desk-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+```
+**What:** tells the running Caddy to pick up the new config with zero downtime.
+The desk's existing sites keep serving throughout; our new site starts serving
+immediately. TLS cert for `fce.lamkalabs.com` is auto-provisioned by Let's
+Encrypt on first request (~10-30s).
+
+### 8.4 Hit the public endpoint
+From your Windows machine (give TLS ~30s to provision on first hit):
 ```cmd
 curl https://fce.lamkalabs.com/health
 ```
-**Verify:** `{"process":"up",...}` over HTTPS. If it 502's, the worker isn't
-running — check Phase 7.3. If it times out, DNS hasn't propagated — wait.
+**Verify:** `{"process":"up","scheduler_running":true,"db_reachable":true}`
+over HTTPS.
 
-✅ **End of Phase 8.** Public HTTPS endpoint live.
+**If it 502's:** the worker isn't reachable from the container. Check:
+- Worker running? `systemctl status fce-worker`
+- Worker bound to `0.0.0.0:8002` (not `127.0.0.1`)? `ss -tlnp | grep 8002`
+- Container can reach the gateway? `docker exec desk-caddy-1 wget -qO- http://172.18.0.1:8002/health`
+
+**If it times out:** DNS hasn't propagated — wait 5 min, retry `nslookup fce.lamkalabs.com`.
+
+**If TLS errors:** the cert is still provisioning — wait 60s and retry. Caddy
+provisions automatically; no manual certbot needed.
+
+✅ **End of Phase 8.** Public HTTPS endpoint live, desk untouched.
 
 ---
 
@@ -589,5 +644,6 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow ssh
 ```
-Do **not** open 5432 (Postgres) or 8000 (worker) to the internet — Caddy proxies
-to them over localhost.
+Do **not** open 5432 (Timescale), 5433 (our Postgres), 8001 (embedder), or 8002
+(worker) to the internet — Caddy proxies to 8002 via the Docker bridge, and all
+other ports are loopback-only. The current ufw rules (22/80/443 only) are correct.
