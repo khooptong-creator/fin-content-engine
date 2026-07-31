@@ -1,0 +1,840 @@
+"""YouTube video automation pipeline (Path B)."""
+import os
+import subprocess
+import uuid
+import asyncio
+from pathlib import Path
+from typing import Any
+
+import structlog
+
+from app import db
+from app.settings import get_settings
+from app.storyboard import (
+    Frame,
+    Storyboard,
+    assign_timing,
+    attach_audio,
+    parse_storyboard,
+    render_index_html,
+)
+
+log = structlog.get_logger()
+settings = get_settings()
+
+VIDEOS_DIR = Path(os.environ.get("VIDEOS_DIR", "../videos")).resolve()
+
+
+def _get_youtube_credentials(scopes: list[str]) -> Any:
+    """
+    Load and refresh OAuth credentials for the YouTube Data API.
+    Looks for an existing token at FCE_YOUTUBE_TOKEN_PATH. If the token is
+    expired but has a refresh token, it refreshes and rewrites the file.
+    Raises a clear RuntimeError if no credentials are available.
+    """
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    token_path = settings.youtube_token_path
+    creds = None
+
+    if token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(token_path), scopes)
+
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        token_path.write_text(creds.to_json(), encoding="utf-8")
+
+    if not creds or not creds.valid:
+        raise RuntimeError(
+            "YouTube OAuth credentials are missing or invalid. "
+            f"Run the OAuth flow to create {token_path} "
+            f"(e.g., `python worker/test_youtube_upload.py`)."
+        )
+
+    return creds
+
+
+async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_preference: str = "manual") -> uuid.UUID | None:
+    """
+    Main entrypoint for generating a YouTube video from a story.
+    Triggered via GUI dashboard.
+    """
+    log.info("youtube_generation_started", story_id=str(story_id), channel_id=channel_id)
+    
+    # 1. Fetch story details
+    story = await _fetch_story_details(story_id)
+    if not story:
+        log.error("story_not_found", story_id=str(story_id))
+        return None
+        
+    slug = f"story-{story_id}"
+    video_dir = VIDEOS_DIR / slug
+    video_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 2. Scripting & Storyboard Generation
+    script_content = await _generate_script_for_story(story, channel_id)
+    storyboard_path = video_dir / "STORYBOARD.md"
+    storyboard_path.write_text(script_content, encoding="utf-8")
+    
+    # 3. Storyboard compilation (voice first, visuals second)
+    #
+    # Narration is generated per frame so each frame's on-screen duration can be
+    # derived from its own measured audio. A single concatenated mp3 leaves no
+    # per-frame timing to key visuals off, which is why this pipeline used to
+    # fall back to a static placeholder card.
+    board = parse_storyboard(script_content)
+    if not board.frames:
+        log.error("storyboard_has_no_frames", story_id=str(story_id))
+        return None
+
+    log.info("youtube_audio_generation_started", video_dir=str(video_dir), frames=len(board.frames))
+    await _generate_frame_audio(board, video_dir, script_content)
+
+    attach_audio(board, video_dir)
+    assign_timing(board, board.meta.get("pacing"))
+
+    index_html_path = video_dir / "index.html"
+    index_html_path.write_text(
+        render_index_html(board, with_bgm=(video_dir / "bgm.mp3").exists()),
+        encoding="utf-8",
+    )
+    duration = board.total_duration
+    log.info("storyboard_compiled", frames=len(board.frames), duration=duration)
+
+    await _generate_frame_compositions(board, video_dir)
+
+    package_json_path = video_dir / "package.json"
+    if not package_json_path.exists():
+        package_json_path.write_text(
+            '{ "name": "generated-video", "private": true, "type": "module" }',
+            encoding="utf-8",
+        )
+    
+    import sys
+    import subprocess
+    from starlette.concurrency import run_in_threadpool
+    npx_cmd = "npx.cmd" if sys.platform == "win32" else "npx"
+    try:
+        def run_hyperframes():
+            return subprocess.run(
+                [npx_cmd, "hyperframes", "render", "--output", "renders/video.mp4"],
+                cwd=str(video_dir),
+                capture_output=True,
+                check=True
+            )
+            
+        proc = await asyncio.to_thread(run_hyperframes)
+        log.info("youtube_rendering_complete")
+    except subprocess.CalledProcessError as e:
+        log.error("youtube_rendering_failed", returncode=e.returncode)
+        raise Exception("youtube rendering failed")
+    except Exception as e:
+        log.error("youtube_rendering_error", error=str(e))
+        raise
+
+    mp4_path = video_dir / "renders" / "video.mp4"
+    
+    # 4. Local Draft Registration
+    # User requested all output videos to be stored locally and NOT pushed to VPS/Cloud.
+    # "manual" means a human reviews in the dashboard first; "auto" tries to upload immediately.
+    status = "pending" if upload_preference == "manual" else "published"
+    external_id = None
+        
+    draft_id = await _record_youtube_draft(
+        story_id=story_id,
+        channel_id=channel_id,
+        upload_preference=upload_preference,
+        file_path=str(mp4_path),
+        status=status,
+        external_id=external_id
+    )
+    
+    log.info("youtube_generation_finished", draft_id=str(draft_id))
+    return draft_id
+
+async def _fetch_story_details(story_id: uuid.UUID) -> dict | None:
+    pool = await db.get_pool()
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT headline FROM stories WHERE id = %s", (story_id,))
+            row = await cur.fetchone()
+            if row:
+                return {"headline": row["headline"]}
+    return None
+
+async def _generate_script_for_story(story: dict, channel_id: str) -> str:
+    """
+    Calls the LLM to generate the storyboard markdown.
+    Fetches the active voice profile from the database configuration.
+    """
+    headline = story.get("headline", "Default Headline")
+    
+    # Fetch active voice profile and blocklist from DB config
+    import json
+    import os
+    from app import db
+    from google import genai
+    from google.genai import types
+    
+    config_data = await db.get_config("voice_profiles")
+    
+    active_prompt = "Default AI voice prompt."
+    active_blocklist = []
+    preset_name = "default"
+    
+    if config_data:
+        try:
+            active_id = config_data.get("activeProfileId")
+            profiles = config_data.get("profiles", [])
+            active_profile = next((p for p in profiles if p.get("id") == active_id), profiles[0] if profiles else None)
+            
+            if active_profile:
+                active_prompt = active_profile.get("prompt", active_prompt)
+                active_blocklist = active_profile.get("blocklist", active_blocklist)
+                preset_name = active_profile.get("id", preset_name)
+        except Exception as e:
+            log.error("voice_profile_fetch_error", error=str(e))
+    
+    # Construct System Instructions
+    blocklist_str = ", ".join([f'"{word}"' for word in active_blocklist])
+    system_instruction = f"""You are generating a script for a faceless YouTube explainer video.
+Your Voice & Personality: {active_prompt}
+
+COMPLIANCE RULES (CRITICAL):
+Do not provide financial advice. Do not recommend buying or selling any specific security or product.
+Explain what happened and why it's interesting — never what the reader should do.
+ABSOLUTELY FORBIDDEN WORDS: {blocklist_str}.
+
+FORMAT:
+You must output a valid markdown document that starts with YAML frontmatter.
+Example format:
+---
+title: "The video title"
+description: "A highly detailed, SEO-optimized description of the video. Write this as a human expert. NEVER mention or allude to AI, ChatGPT, or automated generation."
+preset: {preset_name}
+music: soft upbeat playful
+---
+
+# Video direction
+A clean, minimal, yet highly descriptive cartoonized explainer video.
+
+# Scene 1
+Voiceover: "Welcome to today's topic..."
+Visual: "A bright, cute title card..."
+"""
+
+    user_prompt = f"Write a video script for the following story headline:\n{headline}"
+    
+    log.info("gemini_generation_started", preset=preset_name)
+    try:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set")
+            
+        client = genai.Client(api_key=api_key)
+        
+        response = client.models.generate_content(
+            model='gemini-flash-latest',
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.7,
+            ),
+        )
+        log.info("gemini_generation_completed")
+        return response.text
+        
+    except Exception as e:
+        log.error("gemini_generation_failed", error=str(e))
+        # Fallback to stub if LLM fails
+        return f"""---
+title: "{headline}"
+preset: {preset_name}
+music: soft upbeat playful
+---
+
+# Video direction
+A clean, minimal, yet highly descriptive cartoonized explainer video.
+
+# Scene 1
+Voiceover: "Welcome to today's topic: {headline}!"
+Visual: A bright, cute title card introducing the topic.
+
+# Error Fallback
+Gemini generation failed: {str(e)}
+"""
+
+async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_preference: str, file_path: str, status: str, external_id: str | None) -> uuid.UUID | None:
+    pool = await db.get_pool()
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO drafts 
+                (story_id, platform, format, body, status, published_ids)
+                VALUES (%s, 'youtube', 'video', %s::jsonb, %s, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    story_id, 
+                    db._dumps({
+                        "file_path": file_path, 
+                        "channel_id": channel_id, 
+                        "upload_preference": upload_preference
+                    }), 
+                    status, 
+                    db._dumps({"youtube": external_id}) if external_id else None
+                )
+            )
+            row = await cur.fetchone()
+            return row["id"] if row else None
+
+# ElevenLabs voice ids keyed by the storyboard's `preset` field.
+VOICE_MAP = {
+    "teenage_boy": "ErXwobaYiN019PkySvjV",   # Antoni
+    "teenage_girl": "21m00Tcm4TlvDq8ikWAM",  # Rachel
+    "adult_male": "TxGEqnHWrfWFTfGW9XjX",    # Josh
+    "adult_female": "MF3mGyEYCl7XYWbV9V6O",  # Elli
+    "baby": "jBpfuIE2acCO8z3wKNLl",          # Gigi (child)
+}
+DEFAULT_VOICE = "adult_male"
+
+
+def _extract_preset(script_content: str) -> str:
+    import re
+
+    match = re.search(r"^preset:\s*(.+)$", script_content, re.MULTILINE)
+    return match.group(1).strip() if match else "default"
+
+
+async def _synthesize_line(client: Any, text: str, voice_id: str, output_path: Path) -> None:
+    """Render one narration line to its own mp3."""
+    audio_generator = await client.generate(
+        text=text, voice=voice_id, model="eleven_multilingual_v2"
+    )
+    with open(output_path, "wb") as fh:
+        async for chunk in audio_generator:
+            fh.write(chunk)
+
+
+def _write_silence(output_path: Path, seconds: float = 4.0) -> None:
+    """Emit a silent placeholder so a failed line can't break the whole render."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+            "-t", str(seconds), "-q:a", "9", "-acodec", "libmp3lame", str(output_path),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+async def _generate_frame_audio(board: Storyboard, video_dir: Path, script_content: str) -> None:
+    """Render one voice clip per frame into assets/voice/NN.mp3.
+
+    Per-frame rather than one concatenated track: the compiler measures each clip
+    to place its frame on the timeline, so a single blob would leave every frame
+    without a duration of its own.
+    """
+    from elevenlabs.client import AsyncElevenLabs
+
+    voice_dir = video_dir / "assets" / "voice"
+    voice_dir.mkdir(parents=True, exist_ok=True)
+
+    preset = _extract_preset(script_content)
+    voice_id = VOICE_MAP.get(preset, VOICE_MAP[DEFAULT_VOICE])
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+
+    if not api_key:
+        log.warning("elevenlabs_api_key_missing", fallback="silent_frames")
+        for frame in board.frames:
+            _write_silence(video_dir / frame.voice_filename)
+        return
+
+    client = AsyncElevenLabs(api_key=api_key)
+
+    async def render(frame: Frame) -> None:
+        destination = video_dir / frame.voice_filename
+        if not frame.voiceover:
+            _write_silence(destination, seconds=2.0)
+            return
+        try:
+            await _synthesize_line(client, frame.voiceover, voice_id, destination)
+        except Exception as exc:
+            # One failed line must not cost the whole video; the frame still
+            # occupies time and the storyboard stays intact.
+            log.error("frame_tts_failed", frame=frame.slug, error=str(exc))
+            _write_silence(destination)
+
+    await asyncio.gather(*(render(frame) for frame in board.frames))
+    log.info("frame_audio_generated", frames=len(board.frames), preset=preset)
+
+
+_FRAME_SYSTEM_PROMPT = """You write a single HyperFrames sub-composition: one HTML file that renders one scene of a vertical finance explainer.
+
+AUDIENCE: teenagers and curious adults at once. Bold, clean, confident. Never babyish, never a corporate slide deck.
+
+HARD CONTRACT — a violation means the frame fails to render:
+1. Output ONLY one <template> element. No <!doctype>, <html>, <head>, or markdown fences.
+2. Put <style> and <script> INSIDE the <template>. Anything outside it is discarded.
+3. The root element inside the template must be exactly:
+   <div id="{slug}-root" data-composition-id="{slug}" data-width="1080" data-height="1920" data-duration="{duration}">
+4. Register exactly one timeline, built synchronously:
+   window.__timelines["{slug}"] = gsap.timeline({{ paused: true }});
+5. Prefix EVERY id with "{slug}-". Ids must be unique across the whole assembled page.
+   Select with attribute selectors: '[id="{slug}-card"]'.
+6. The scene background goes on a full-bleed child (position:absolute; inset:0), NEVER on the root element itself — a fill on the root renders black in the final video.
+7. Give the root `container-type: size` and size children in cqw/cqh units so the layout scales.
+
+DETERMINISM — the renderer seeks to arbitrary timestamps:
+- No Date, no performance.now(), no unseeded Math.random(), no network requests, no repeat:-1 (use a finite repeat count).
+- Animate only transform, opacity, filter, color, background-color, and stroke/fill.
+- Never animate display or visibility.
+- Every tween needs an explicit position parameter so the timeline is reproducible.
+
+3D STYLE: the parent composition sets `perspective: 1400px` and this scene inherits `transform-style: preserve-3d`. Use translateZ, rotateY and rotateX on cards and text so elements have real depth. Favour layered cards with soft shadows, bold sans-serif type, one accent colour against a dark ground, and generous negative space. Animate with GSAP eases such as power3.out and back.out.
+
+Text must be legible at a glance: display type at least 6cqw. No <br> in body text."""
+
+
+async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> None:
+    """Generate one sub-composition HTML file per frame, concurrently."""
+    from google import genai
+    from google.genai import types
+
+    frames_dir = video_dir / "compositions" / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        log.warning("gemini_api_key_missing", fallback="placeholder_frames")
+        for frame in board.frames:
+            (frames_dir / f"{frame.slug}.html").write_text(
+                _placeholder_frame(frame), encoding="utf-8"
+            )
+        return
+
+    client = genai.Client(api_key=api_key)
+
+    async def build(frame: Frame) -> None:
+        destination = frames_dir / f"{frame.slug}.html"
+        system_instruction = _FRAME_SYSTEM_PROMPT.format(
+            slug=frame.slug, duration=frame.duration
+        )
+        shots = "\n".join(frame.shots) or "(no shot sequence given)"
+        user_prompt = (
+            f"GLOBAL DIRECTION: {board.direction or 'Clean, bold, 3D finance explainer.'}\n\n"
+            f"SCENE: {frame.scene or frame.title}\n"
+            f"NARRATION SPOKEN OVER THIS FRAME: \"{frame.voiceover}\"\n"
+            f"ON SCREEN FOR: {frame.duration} seconds\n"
+            f"SHOT SEQUENCE:\n{shots}\n\n"
+            "Write the sub-composition."
+        )
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model="gemini-flash-latest",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction, temperature=0.6
+                ),
+            )
+            html = _strip_code_fence(response.text or "")
+            if "<template" not in html:
+                raise ValueError("response did not contain a <template> element")
+            destination.write_text(html, encoding="utf-8")
+        except Exception as exc:
+            # A frame that fails to generate still has to occupy its slot, or the
+            # narration plays over nothing.
+            log.error("frame_composition_failed", frame=frame.slug, error=str(exc))
+            destination.write_text(_placeholder_frame(frame), encoding="utf-8")
+
+    await asyncio.gather(*(build(frame) for frame in board.frames))
+    log.info("frame_compositions_generated", frames=len(board.frames))
+
+
+def _strip_code_fence(text: str) -> str:
+    """Remove ```html fences the model sometimes wraps its output in."""
+    import re
+
+    stripped = text.strip()
+    fence = re.match(r"^```[a-zA-Z]*\n(.*)\n```$", stripped, re.DOTALL)
+    return fence.group(1).strip() if fence else stripped
+
+
+def _placeholder_frame(frame: Frame) -> str:
+    """Minimal valid sub-composition: the narration as a legible title card."""
+    text = (frame.voiceover or frame.title).replace("<", "&lt;").replace(">", "&gt;")
+    return f"""<template>
+  <style>
+    [id="{frame.slug}-root"] {{
+      width: 100%; height: 100%; position: relative;
+      container-type: size; overflow: hidden;
+    }}
+    [id="{frame.slug}-bg"] {{ position: absolute; inset: 0; background: #0B1220; }}
+    [id="{frame.slug}-text"] {{
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      padding: 10cqw;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 7cqw; font-weight: 700; line-height: 1.3;
+      color: #F8FAFC; text-align: center;
+    }}
+  </style>
+
+  <div id="{frame.slug}-root" data-composition-id="{frame.slug}"
+       data-width="1080" data-height="1920" data-duration="{frame.duration}">
+    <div class="clip" id="{frame.slug}-bg" data-start="0"
+         data-duration="{frame.duration}" data-track-index="0"></div>
+    <div id="{frame.slug}-text">{text}</div>
+  </div>
+
+  <script>
+    (function () {{
+      const tl = gsap.timeline({{ paused: true }});
+      window.__timelines["{frame.slug}"] = tl;
+      tl.fromTo('[id="{frame.slug}-text"]',
+        {{ opacity: 0, y: 40 }},
+        {{ opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }},
+        0
+      );
+    }})();
+  </script>
+</template>
+"""
+
+
+async def _generate_audio_for_script(script_content: str, output_path: Path):
+    """
+    Parses the generated script for 'Voiceover:' lines, concatenates them,
+    and calls the ElevenLabs API to generate TTS audio.
+    """
+    import re
+    import os
+    from elevenlabs.client import AsyncElevenLabs
+    
+    # 1. Parse preset from YAML frontmatter
+    preset = "default"
+    preset_match = re.search(r"^preset:\s*(.+)$", script_content, re.MULTILINE)
+    if preset_match:
+        preset = preset_match.group(1).strip()
+    
+    # 2. Extract Voiceover lines
+    # We look for lines starting with 'Voiceover:' or 'Voiceover: "'
+    # It might be in bold `**Voiceover:**` so we handle that too.
+    voiceover_lines = []
+    for line in script_content.splitlines():
+        line = line.strip()
+        # Regex to match Voiceover: <text> with optional markdown formatting
+        match = re.match(r"^(?:\*\*)?Voiceover:(?:\*\*)?\s*\"?(.+?)\"?$", line, re.IGNORECASE)
+        if match:
+            voiceover_lines.append(match.group(1).strip())
+            
+    if not voiceover_lines:
+        log.warning("no_voiceover_lines_found", preset=preset)
+        voiceover_text = "No voiceover text found."
+    else:
+        voiceover_text = " ".join(voiceover_lines)
+        
+    log.info("parsed_voiceover_text", length=len(voiceover_text), preset=preset)
+    
+    # 3. Map preset to ElevenLabs Voice ID
+    # These are default ElevenLabs voices mapped to our personas
+    voice_map = {
+        "teenage_boy": "ErXwobaYiN019PkySvjV",  # Antoni
+        "teenage_girl": "21m00Tcm4TlvDq8ikWAM", # Rachel
+        "adult_male": "TxGEqnHWrfWFTfGW9XjX",   # Josh
+        "adult_female": "MF3mGyEYCl7XYWbV9V6O", # Elli
+        "baby": "jBpfuIE2acCO8z3wKNLl",         # Gigi (child)
+    }
+    
+    voice_id = voice_map.get(preset, voice_map["adult_male"]) # default to adult_male if not found
+    
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not api_key:
+        log.warning("elevenlabs_api_key_missing", fallback="dummy_audio")
+        import subprocess
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+            "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", str(output_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+        
+    # 4. Generate audio via ElevenLabs
+    try:
+        client = AsyncElevenLabs(api_key=api_key)
+        audio_generator = await client.generate(
+            text=voiceover_text,
+            voice=voice_id,
+            model="eleven_multilingual_v2"
+        )
+        
+        # Write bytes to output_path
+        with open(output_path, "wb") as f:
+            async for chunk in audio_generator:
+                f.write(chunk)
+                
+        log.info("youtube_audio_generation_completed", path=str(output_path))
+    except Exception as e:
+        log.error("youtube_audio_generation_failed", error=str(e))
+        # Write dummy file on failure so rendering doesn't crash entirely if it depends on the file
+        import subprocess
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+            "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", str(output_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+async def _upload_to_youtube(video_path: str, title: str, description: str) -> str:
+    """
+    Uploads a video to YouTube Data API v3. 
+    Runs the blocking Google API client in a threadpool.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    
+    def _do_upload():
+        creds = _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
+        youtube = build("youtube", "v3", credentials=creds)
+        
+        body = {
+            "snippet": {
+                "title": title[:100],  # Max 100 chars
+                "description": description[:5000],  # Max 5000 chars
+                "tags": ["finance", "explainer", "shorts"],
+                "categoryId": "27"  # Education
+            },
+            "status": {
+                "privacyStatus": "private",  # Upload as draft
+                "selfDeclaredMadeForKids": False
+            }
+        }
+        
+        media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
+        request = youtube.videos().insert(
+            part=",".join(body.keys()),
+            body=body,
+            media_body=media
+        )
+        
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                log.info("youtube_upload_progress", progress=int(status.progress() * 100))
+        
+        return response["id"]
+        
+    return await run_in_threadpool(_do_upload)
+
+async def _generate_thumbnail(title: str, output_path: str):
+    """
+    Generates a thumbnail using a minimal HTML template and Playwright.
+    """
+    from starlette.concurrency import run_in_threadpool
+    import subprocess
+    import tempfile
+    import sys
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{
+                margin: 0;
+                width: 1280px;
+                height: 720px;
+                background: linear-gradient(135deg, #1e1e2f, #2a2a40);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                color: #ffffff;
+                text-align: center;
+                padding: 60px;
+                box-sizing: border-box;
+                border: 12px solid #ff4a5a;
+            }}
+            h1 {{
+                font-size: 80px;
+                font-weight: 900;
+                text-transform: uppercase;
+                text-shadow: 0 10px 30px rgba(0,0,0,0.8);
+                line-height: 1.2;
+                margin: 0;
+            }}
+            .badge {{
+                position: absolute;
+                top: 40px;
+                left: 40px;
+                background: #ff4a5a;
+                color: white;
+                padding: 10px 30px;
+                font-size: 30px;
+                font-weight: bold;
+                border-radius: 50px;
+                text-transform: uppercase;
+                box-shadow: 0 4px 15px rgba(255, 74, 90, 0.4);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="badge">Trending</div>
+        <h1>{title}</h1>
+    </body>
+    </html>
+    """
+    
+    def _run():
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(html)
+            temp_html = f.name
+            
+        npx_cmd = "npx.cmd" if sys.platform == "win32" else "npx"
+        try:
+            # We use playwright cli to snapshot it
+            subprocess.run(
+                [npx_cmd, "playwright", "screenshot", f"file:///{temp_html.replace(chr(92), '/')}", output_path],
+                check=True,
+                capture_output=True
+            )
+        finally:
+            import os
+            try:
+                os.unlink(temp_html)
+            except:
+                pass
+                
+    await run_in_threadpool(_run)
+
+async def _upload_thumbnail(video_id: str, thumbnail_path: str):
+    """
+    Uploads a custom thumbnail for the given YouTube video ID.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from googleapiclient.discovery import build
+    
+    def _do_upload():
+        creds = _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
+        youtube = build("youtube", "v3", credentials=creds)
+        request = youtube.thumbnails().set(
+            videoId=video_id,
+            media_body=thumbnail_path
+        )
+        request.execute()
+        
+    return await run_in_threadpool(_do_upload)
+
+async def get_youtube_analytics(video_ids: list[str]) -> dict:
+    """
+    Fetches view count, like count, and comment count for the given video IDs.
+    Returns a dictionary mapping videoId to stats.
+    """
+    if not video_ids:
+        return {}
+        
+    from starlette.concurrency import run_in_threadpool
+    from googleapiclient.discovery import build
+    
+    def _do_fetch():
+        creds = _get_youtube_credentials(
+            ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/youtube.upload"]
+        )
+        youtube = build("youtube", "v3", credentials=creds)
+        
+        # YouTube API allows up to 50 IDs per request
+        results = {}
+        for i in range(0, len(video_ids), 50):
+            batch = video_ids[i:i+50]
+            request = youtube.videos().list(
+                part="statistics,snippet",
+                id=",".join(batch)
+            )
+            response = request.execute()
+            
+            for item in response.get("items", []):
+                stats = item.get("statistics", {})
+                results[item["id"]] = {
+                    "views": stats.get("viewCount", "0"),
+                    "likes": stats.get("likeCount", "0"),
+                    "comments": stats.get("commentCount", "0"),
+                    "title": item.get("snippet", {}).get("title", "")
+                }
+        return results
+        
+    try:
+        return await run_in_threadpool(_do_fetch)
+    except Exception as e:
+        log.error("youtube_analytics_fetch_failed", error=str(e))
+        return {}
+
+
+def _parse_storyboard_frontmatter(storyboard_path: Path) -> dict[str, str]:
+    """
+    Parse a simple YAML frontmatter block from the storyboard markdown.
+    Returns a dict with at least 'title' and 'description' keys.
+    """
+    text = storyboard_path.read_text(encoding="utf-8") if storyboard_path.exists() else ""
+    frontmatter: dict[str, str] = {"title": "", "description": ""}
+    if text.startswith("---"):
+        try:
+            _, fm, _ = text.split("---", 2)
+            for line in fm.strip().splitlines():
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    frontmatter[key.strip()] = value.strip().strip('"').strip("'")
+        except Exception:
+            pass
+    return frontmatter
+
+
+async def publish_youtube_draft(draft_id: uuid.UUID) -> dict[str, str]:
+    """
+    Publish a pending YouTube draft: upload the rendered MP4, attach a thumbnail,
+    and update the draft record. Returns {video_id, url}.
+    """
+    log.info("youtube_publish_started", draft_id=str(draft_id))
+
+    draft = await db.get_draft(draft_id)
+    if not draft:
+        raise ValueError(f"Draft {draft_id} not found")
+    if draft.get("platform") != "youtube":
+        raise ValueError(f"Draft {draft_id} is not a YouTube draft")
+
+    body = draft.get("body") or {}
+    file_path = body.get("file_path")
+    if not file_path:
+        raise ValueError(f"Draft {draft_id} has no file_path")
+
+    video_path = Path(file_path)
+    if not video_path.exists():
+        raise FileNotFoundError(f"Rendered video not found: {video_path}")
+
+    # Prefer an already-rendered thumbnail; fall back to generating one.
+    thumbnail_path = video_path.parent / "thumbnail.jpg"
+    if not thumbnail_path.exists():
+        thumbnail_path = video_path.parent / "thumbnail.png"
+    if not thumbnail_path.exists():
+        thumbnail_path = video_path.parent / "thumbnail.jpg"
+        await _generate_thumbnail(draft.get("headline", "Video"), str(thumbnail_path))
+
+    storyboard_path = video_path.parent.parent / "STORYBOARD.md"
+    frontmatter = _parse_storyboard_frontmatter(storyboard_path)
+
+    title = frontmatter.get("title") or draft.get("headline") or "Untitled Video"
+    description = frontmatter.get("description") or title
+
+    video_id = await _upload_to_youtube(str(video_path), title, description)
+    await _upload_thumbnail(video_id, str(thumbnail_path))
+
+    await db.update_draft_published(
+        draft_id,
+        status="published",
+        published_ids={"youtube": video_id},
+    )
+
+    log.info("youtube_publish_finished", draft_id=str(draft_id), video_id=video_id)
+    return {"video_id": video_id, "url": f"https://youtube.com/watch?v={video_id}"}
