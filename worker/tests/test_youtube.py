@@ -11,6 +11,17 @@ from app.youtube import (
     _parse_storyboard_frontmatter,
 )
 
+# Long enough to clear MIN_SCRIPT_FRAMES. Tests that assert on ratios need a
+# script the length guard accepts, otherwise they abort before reaching the
+# behaviour under test.
+SCRIPT_4_SCENES = (
+    "---\ntitle: Test\npreset: daisy-days\n---\n\n"
+    "# Scene 1\nVoiceover: A\n\n"
+    "# Scene 2\nVoiceover: B\n\n"
+    "# Scene 3\nVoiceover: C\n\n"
+    "# Scene 4\nVoiceover: D\n"
+)
+
 
 @pytest.mark.asyncio
 @patch("app.youtube._fetch_story_details")
@@ -24,7 +35,7 @@ async def test_generate_youtube_video_manual(
 ):
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
-    mock_script.return_value = "---\ntitle: Test\npreset: daisy-days\n---\n\n# Scene 1\nVoiceover: Hello\n"
+    mock_script.return_value = SCRIPT_4_SCENES
     mock_record.return_value = uuid.uuid4()
     mock_run.return_value = MagicMock(stdout="Mocked hyperframes output")
     mock_audio.return_value = []
@@ -60,7 +71,7 @@ async def test_generate_youtube_video_auto_status(
 ):
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
-    mock_script.return_value = "---\ntitle: Test\npreset: daisy-days\n---\n\n# Scene 1\nVoiceover: Hello\n"
+    mock_script.return_value = SCRIPT_4_SCENES
     mock_record.return_value = uuid.uuid4()
     mock_run.return_value = MagicMock(stdout="Mocked hyperframes output")
     mock_audio.return_value = []
@@ -95,13 +106,11 @@ async def test_generation_aborts_when_most_frames_are_placeholders(
     notice the video is mostly fallback. It must never reach YouTube."""
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
-    mock_script.return_value = (
-        "---\ntitle: Test\n---\n\n# Scene 1\nVoiceover: A\n\n# Scene 2\nVoiceover: B\n"
-    )
+    mock_script.return_value = SCRIPT_4_SCENES
     mock_record.return_value = uuid.uuid4()
     mock_run.return_value = MagicMock(stdout="Mocked hyperframes output")
     mock_audio.return_value = []
-    # Both frames fell back, e.g. the LLM was rate limited.
+    # Half the frames fell back, e.g. the LLM was rate limited.
     mock_frames.return_value = ["f01-frame", "f02-frame"]
 
     with patch("app.youtube.VIDEOS_DIR", tmp_path):
@@ -129,13 +138,11 @@ async def test_generation_aborts_when_most_frames_are_silent(
     passes every downstream check. It must never reach YouTube."""
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
-    mock_script.return_value = (
-        "---\ntitle: Test\n---\n\n# Scene 1\nVoiceover: A\n\n# Scene 2\nVoiceover: B\n"
-    )
+    mock_script.return_value = SCRIPT_4_SCENES
     mock_record.return_value = uuid.uuid4()
     mock_run.return_value = MagicMock(stdout="Mocked hyperframes output")
     mock_frames.return_value = []
-    # Both lines failed TTS, e.g. the account hit its concurrency limit.
+    # Half the lines failed TTS, e.g. the account hit its concurrency limit.
     mock_audio.return_value = ["f01-frame", "f02-frame"]
 
     with patch("app.youtube.VIDEOS_DIR", tmp_path):
@@ -148,6 +155,61 @@ async def test_generation_aborts_when_most_frames_are_silent(
     assert draft_id is None
     mock_record.assert_not_called()
     # Aborted before wasting a render on a mute video.
+    mock_frames.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.youtube._fetch_story_details")
+@patch("app.youtube._record_youtube_draft")
+@patch("app.youtube._generate_script_for_story")
+@patch("app.youtube._generate_frame_audio")
+@patch("app.youtube._build_frames")
+async def test_generation_aborts_when_script_generation_fails(
+    mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
+):
+    """A failed script must not become a video. This was observed live: Gemini
+    returned 503, the caller substituted a one-scene stub, and the pipeline
+    reported success on a five second draft."""
+    mock_fetch.return_value = {"headline": "Test Story"}
+    mock_script.side_effect = RuntimeError("503 UNAVAILABLE")
+
+    with patch("app.youtube.VIDEOS_DIR", tmp_path):
+        draft_id = await generate_youtube_video(
+            story_id=uuid.uuid4(),
+            channel_id="financial-channel",
+            upload_preference="auto",
+        )
+
+    assert draft_id is None
+    mock_record.assert_not_called()
+    mock_audio.assert_not_called()
+    mock_frames.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.youtube._fetch_story_details")
+@patch("app.youtube._record_youtube_draft")
+@patch("app.youtube._generate_script_for_story")
+@patch("app.youtube._generate_frame_audio")
+@patch("app.youtube._build_frames")
+async def test_generation_aborts_when_script_is_too_short(
+    mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
+):
+    """The placeholder and silence guards are ratios, so a one-frame script
+    scores perfectly on both. Length has to be checked on its own."""
+    mock_fetch.return_value = {"headline": "Test Story"}
+    mock_script.return_value = "---\ntitle: Test\n---\n\n# Scene 1\nVoiceover: Hello\n"
+
+    with patch("app.youtube.VIDEOS_DIR", tmp_path):
+        draft_id = await generate_youtube_video(
+            story_id=uuid.uuid4(),
+            channel_id="financial-channel",
+            upload_preference="auto",
+        )
+
+    assert draft_id is None
+    mock_record.assert_not_called()
+    mock_audio.assert_not_called()
     mock_frames.assert_not_called()
 
 

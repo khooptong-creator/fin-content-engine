@@ -31,9 +31,14 @@ Cloud is used only where local can't reach the quality bar.
 - Ollama at `127.0.0.1:11434`, never `localhost` — Windows resolves ::1 first and
   Ollama binds IPv4 only.
 - Frame generation is sequential: one GPU serves one request at a time.
-- Never publish a video that is mostly placeholder frames — guard in
-  `youtube.py` aborts above a 0.5 ratio.
+- Never publish a degraded video. Three independent guards in `youtube.py`, all
+  needed because each failure produces something that renders and validates
+  cleanly: `MIN_SCRIPT_FRAMES` (a stubbed script scores 100% on every ratio),
+  `MAX_SILENT_RATIO`, `MAX_PLACEHOLDER_RATIO`.
+- Never fabricate a script when the LLM fails. It becomes a publishable draft.
 - Tests must not touch the network. Patch `_build_frames`, not a backend.
+- Don't run `pytest` while an end-to-end run is in flight — the DB tests
+  truncate tables and will delete the story mid-render.
 - Commit source only. Rendered `mp4`/`mp3`/`wav`, `renders/`, `assets/voice/`
   are gitignored.
 - Assistant commits and pushes; never leave that to the user.

@@ -33,6 +33,14 @@ MAX_PLACEHOLDER_RATIO = float(os.environ.get("MAX_PLACEHOLDER_RATIO", "0.25"))
 # quarter of a video can survive fallback cards, but not a quarter in silence.
 MAX_SILENT_RATIO = float(os.environ.get("MAX_SILENT_RATIO", "0.2"))
 
+# A real explainer opens, develops and closes. Anything shorter than this is a
+# truncated script rather than a video, and the ratio guards below cannot catch
+# it: one good frame out of one is a perfect score.
+MIN_SCRIPT_FRAMES = int(os.environ.get("MIN_SCRIPT_FRAMES", "3"))
+
+# 503 UNAVAILABLE from Gemini is routine and clears in seconds.
+SCRIPT_MAX_ATTEMPTS = int(os.environ.get("SCRIPT_MAX_ATTEMPTS", "4"))
+
 
 def _get_youtube_credentials(scopes: list[str]) -> Any:
     """
@@ -82,7 +90,11 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     video_dir.mkdir(parents=True, exist_ok=True)
     
     # 2. Scripting & Storyboard Generation
-    script_content = await _generate_script_for_story(story, channel_id)
+    try:
+        script_content = await _generate_script_for_story(story, channel_id)
+    except Exception as e:
+        log.error("youtube_generation_aborted", reason="script_generation_failed", error=str(e))
+        return None
     storyboard_path = video_dir / "STORYBOARD.md"
     storyboard_path.write_text(script_content, encoding="utf-8")
     
@@ -93,8 +105,16 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     # per-frame timing to key visuals off, which is why this pipeline used to
     # fall back to a static placeholder card.
     board = parse_storyboard(script_content)
-    if not board.frames:
-        log.error("storyboard_has_no_frames", story_id=str(story_id))
+    if len(board.frames) < MIN_SCRIPT_FRAMES:
+        # Too short to be the story, and every later guard is a ratio: they read
+        # a one-frame script as a flawless video.
+        log.error(
+            "youtube_generation_aborted",
+            reason="script_too_short",
+            story_id=str(story_id),
+            frames=len(board.frames),
+            minimum=MIN_SCRIPT_FRAMES,
+        )
         return None
 
     log.info("youtube_audio_generation_started", video_dir=str(video_dir), frames=len(board.frames))
@@ -267,14 +287,16 @@ Visual: "A bright, cute title card..."
     user_prompt = f"Write a video script for the following story headline:\n{headline}"
     
     log.info("gemini_generation_started", preset=preset_name)
-    try:
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is not set")
-            
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY environment variable is not set")
+
+    client = genai.Client(api_key=api_key)
+
+    def call_gemini():
+        # The SDK is synchronous; off the event loop so the pool keeps serving.
+        return client.models.generate_content(
             model='gemini-flash-latest',
             contents=user_prompt,
             config=types.GenerateContentConfig(
@@ -282,49 +304,61 @@ Visual: "A bright, cute title card..."
                 temperature=0.7,
             ),
         )
-        log.info("gemini_generation_completed")
-        return response.text
-        
-    except Exception as e:
-        log.error("gemini_generation_failed", error=str(e))
-        # Fallback to stub if LLM fails
-        return f"""---
-title: "{headline}"
-preset: {preset_name}
-music: soft upbeat playful
----
 
-# Video direction
-A clean, minimal, yet highly descriptive cartoonized explainer video.
+    # This used to swallow every failure and return a one-scene stub. That stub
+    # renders cleanly and passes the placeholder and silence guards — one good
+    # frame out of one is a perfect score — so a Gemini outage produced a five
+    # second "video" recorded as a draft ready to publish. There is no safe
+    # fabricated script: fail loudly and let the caller abort.
+    last_error: Exception | None = None
+    for attempt in range(1, SCRIPT_MAX_ATTEMPTS + 1):
+        try:
+            response = await asyncio.to_thread(call_gemini)
+            log.info("gemini_generation_completed", attempt=attempt)
+            return response.text
+        except Exception as e:
+            last_error = e
+            if attempt == SCRIPT_MAX_ATTEMPTS or not _is_retryable(e):
+                break
+            delay = 2 ** attempt
+            log.warning(
+                "gemini_generation_retry",
+                attempt=attempt,
+                delay=delay,
+                error=str(e)[:160],
+            )
+            await asyncio.sleep(delay)
 
-# Scene 1
-Voiceover: "Welcome to today's topic: {headline}!"
-Visual: A bright, cute title card introducing the topic.
-
-# Error Fallback
-Gemini generation failed: {str(e)}
-"""
+    log.error("gemini_generation_failed", attempts=attempt, error=str(last_error))
+    raise RuntimeError(f"script generation failed after {attempt} attempts: {last_error}")
 
 async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_preference: str, file_path: str, status: str, external_id: str | None) -> uuid.UUID | None:
     pool = await db.get_pool()
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
+                # channel_id and upload_preference are written twice on purpose.
+                # Readers go through body->>'...' (see db.py), but migration 006
+                # added real columns, and leaving them NULL/default means any SQL
+                # that trusts the schema silently reads every draft as 'manual'.
                 """
-                INSERT INTO drafts 
-                (story_id, platform, format, body, status, published_ids)
-                VALUES (%s, 'youtube', 'video', %s::jsonb, %s, %s::jsonb)
+                INSERT INTO drafts
+                (story_id, platform, format, body, status, published_ids,
+                 channel_id, upload_preference)
+                VALUES (%s, 'youtube', 'video', %s::jsonb, %s, %s::jsonb, %s, %s)
                 RETURNING id
                 """,
                 (
-                    story_id, 
+                    story_id,
                     db._dumps({
-                        "file_path": file_path, 
-                        "channel_id": channel_id, 
+                        "file_path": file_path,
+                        "channel_id": channel_id,
                         "upload_preference": upload_preference
-                    }), 
-                    status, 
-                    db._dumps({"youtube": external_id}) if external_id else None
+                    }),
+                    status,
+                    db._dumps({"youtube": external_id}) if external_id else None,
+                    channel_id,
+                    upload_preference,
                 )
             )
             row = await cur.fetchone()
@@ -390,12 +424,16 @@ def _write_silence(output_path: Path, seconds: float = 4.0) -> None:
     )
 
 
-async def _generate_frame_audio(board: Storyboard, video_dir: Path, script_content: str) -> None:
+async def _generate_frame_audio(
+    board: Storyboard, video_dir: Path, script_content: str
+) -> list[str]:
     """Render one voice clip per frame into assets/voice/NN.mp3.
 
     Per-frame rather than one concatenated track: the compiler measures each clip
     to place its frame on the timeline, so a single blob would leave every frame
     without a duration of its own.
+
+    Returns the slugs that fell back to silence.
     """
     from elevenlabs.client import AsyncElevenLabs
 
