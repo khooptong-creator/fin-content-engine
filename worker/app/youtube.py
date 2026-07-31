@@ -25,6 +25,10 @@ settings = get_settings()
 
 VIDEOS_DIR = Path(os.environ.get("VIDEOS_DIR", "../videos")).resolve()
 
+# Above this share of fallback title cards the video no longer represents the
+# story, so generation aborts instead of producing something publishable.
+MAX_PLACEHOLDER_RATIO = float(os.environ.get("MAX_PLACEHOLDER_RATIO", "0.25"))
+
 
 def _get_youtube_credentials(scopes: list[str]) -> Any:
     """
@@ -104,7 +108,22 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     duration = board.total_duration
     log.info("storyboard_compiled", frames=len(board.frames), duration=duration)
 
-    await _generate_frame_compositions(board, video_dir)
+    placeholders = await _generate_frame_compositions(board, video_dir)
+    if placeholders:
+        # A placeholder renders fine and passes validation, so nothing downstream
+        # would notice that most of the video is fallback title cards. Refuse to
+        # continue rather than publish that under the story's headline.
+        ratio = len(placeholders) / len(board.frames)
+        log.error(
+            "frame_generation_degraded",
+            story_id=str(story_id),
+            placeholders=len(placeholders),
+            frames=len(board.frames),
+            slugs=placeholders,
+        )
+        if ratio > MAX_PLACEHOLDER_RATIO:
+            log.error("youtube_generation_aborted", reason="too_many_placeholder_frames")
+            return None
 
     package_json_path = video_dir / "package.json"
     if not package_json_path.exists():
@@ -390,24 +409,71 @@ HARD CONTRACT — a violation means the frame fails to render:
 6. The scene background goes on a full-bleed child (position:absolute; inset:0), NEVER on the root element itself — a fill on the root renders black in the final video.
 7. Give the root `container-type: size` and size children in cqw/cqh units so the layout scales.
 
-DETERMINISM — the renderer seeks to arbitrary timestamps:
+DETERMINISM — frames are rendered out of order by parallel workers, so identical timestamps must produce identical pixels:
 - No Date, no performance.now(), no unseeded Math.random(), no network requests, no repeat:-1 (use a finite repeat count).
 - Animate only transform, opacity, filter, color, background-color, and stroke/fill.
 - Never animate display or visibility.
 - Every tween needs an explicit position parameter so the timeline is reproducible.
+- NEVER use relative values such as "+=60" or "-=5". Relative tweens capture their base when the tween initialises, so a worker starting mid-timeline resolves a different base and renders the same frame differently. Always use fromTo() with explicit from and to values.
+- Never let two tweens write the same property of the same element at overlapping times. Sequence them so they do not overlap, or pass overwrite: "auto".
 
-3D STYLE: the parent composition sets `perspective: 1400px` and this scene inherits `transform-style: preserve-3d`. Use translateZ, rotateY and rotateX on cards and text so elements have real depth. Favour layered cards with soft shadows, bold sans-serif type, one accent colour against a dark ground, and generous negative space. Animate with GSAP eases such as power3.out and back.out.
+FONTS — never declare a family you have not loaded, and never load one:
+- The ONLY permitted font-family declaration is:
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+- No <link> and no @import from fonts.googleapis.com. External font requests add latency and can fail mid-render.
+- If the global direction names a typeface (Fredoka, Quicksand, Poppins, anything), IGNORE the name and use the stack above. Declaring an unloaded family makes the renderer silently substitute a fallback, so the rendered typography stops matching the design.
+- Express personality through weight, size, letter-spacing, and colour instead of typeface choice.
 
-Text must be legible at a glance: display type at least 6cqw. No <br> in body text."""
+PALETTE — use these exact values, nothing else:
+  ground   #0B1220   surface  #1B2A4A   surface-alt #24365C
+  text     #F8FAFC   muted    #CBD5E1
+  accent   #38BDF8   positive #34D399   warning #FBBF24   negative #F87171
+
+CONTRAST — the render is rejected below 4.5:1 on text:
+- Text on ground/surface/surface-alt is #F8FAFC, or #CBD5E1 for secondary text only.
+- Text on an accent, positive, warning or negative fill is ALWAYS #0B1220.
+- Never colour text with an accent on top of a coloured surface, and never place a light accent on a light fill.
+- Accents belong to shapes, bars, borders, and glows, not to body copy.
+
+LAYOUT — overlapping text is rejected:
+- Lay the frame out as a single vertical column: `display:flex; flex-direction:column` with gap. Every text block gets its own row.
+- Never absolutely position one text block on top of another, and never put SVG <text> over an HTML text block.
+- Decorative absolutely-positioned elements must contain no text.
+- Keep content inside the middle 80% of the height; the top and bottom are covered by platform UI.
+
+3D STYLE: the parent composition sets `perspective: 1400px` and this scene inherits `transform-style: preserve-3d`. Use translateZ, rotateY and rotateX on cards so elements have real depth, with soft shadows to sell it. Animate with GSAP eases such as power3.out and back.out(1.5).
+
+Text must be legible at a glance: display type at least 7cqw, body at least 4.5cqw, weight 600+. No <br> in body text."""
 
 
-async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> None:
-    """Generate one sub-composition HTML file per frame, concurrently."""
+def _is_retryable(exc: BaseException) -> bool:
+    """Rate limits and transient server errors are worth another attempt."""
+    text = str(exc)
+    return any(
+        marker in text
+        for marker in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500")
+    )
+
+
+async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> list[str]:
+    """Generate one sub-composition per frame. Returns the slugs that fell back.
+
+    The caller must inspect the return value. A placeholder keeps the render
+    alive, but a video mostly made of placeholders is not the video that was
+    asked for and must never be published as though it were.
+    """
     from google import genai
     from google.genai import types
+    from tenacity import (
+        AsyncRetrying,
+        retry_if_exception,
+        stop_after_attempt,
+        wait_exponential,
+    )
 
     frames_dir = video_dir / "compositions" / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
+    failed: list[str] = []
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -416,7 +482,7 @@ async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> No
             (frames_dir / f"{frame.slug}.html").write_text(
                 _placeholder_frame(frame), encoding="utf-8"
             )
-        return
+        return [frame.slug for frame in board.frames]
 
     client = genai.Client(api_key=api_key)
 
@@ -435,14 +501,23 @@ async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> No
             "Write the sub-composition."
         )
         try:
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-flash-latest",
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction, temperature=0.6
-                ),
-            )
+            # Rate limits are the common failure when generating a whole board at
+            # once, and they clear on their own; retry before giving up a frame.
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(4),
+                wait=wait_exponential(multiplier=2, min=2, max=30),
+                retry=retry_if_exception(_is_retryable),
+                reraise=True,
+            ):
+                with attempt:
+                    response = await asyncio.to_thread(
+                        client.models.generate_content,
+                        model="gemini-flash-latest",
+                        contents=user_prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instruction, temperature=0.6
+                        ),
+                    )
             html = _strip_code_fence(response.text or "")
             if "<template" not in html:
                 raise ValueError("response did not contain a <template> element")
@@ -450,11 +525,17 @@ async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> No
         except Exception as exc:
             # A frame that fails to generate still has to occupy its slot, or the
             # narration plays over nothing.
-            log.error("frame_composition_failed", frame=frame.slug, error=str(exc))
+            log.error("frame_composition_failed", frame=frame.slug, error=str(exc)[:200])
             destination.write_text(_placeholder_frame(frame), encoding="utf-8")
+            failed.append(frame.slug)
 
     await asyncio.gather(*(build(frame) for frame in board.frames))
-    log.info("frame_compositions_generated", frames=len(board.frames))
+    log.info(
+        "frame_compositions_generated",
+        frames=len(board.frames),
+        placeholders=len(failed),
+    )
+    return failed
 
 
 def _strip_code_fence(text: str) -> str:

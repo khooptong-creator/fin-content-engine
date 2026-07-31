@@ -141,6 +141,11 @@ async def main() -> None:
     parser.add_argument("--skip-audio", action="store_true", help="silent narration")
     parser.add_argument("--skip-frames", action="store_true", help="placeholder frames")
     parser.add_argument("--render", action="store_true", help="render an mp4 after checking")
+    parser.add_argument(
+        "--allow-placeholders",
+        action="store_true",
+        help="continue even when frames fell back to placeholder cards",
+    )
     args = parser.parse_args()
 
     skip_audio = args.dry or args.skip_audio
@@ -207,7 +212,17 @@ async def main() -> None:
             )
     else:
         print("-> frames: Gemini...")
-        await _generate_frame_compositions(board, video_dir)
+        placeholders = await _generate_frame_compositions(board, video_dir)
+        if placeholders:
+            # These render and pass check, so without this the run looks clean
+            # while most of the video is fallback title cards.
+            print(
+                f"\n!! {len(placeholders)}/{len(board.frames)} frames fell back to "
+                f"placeholder cards: {', '.join(placeholders)}"
+            )
+            print("!! usually a Gemini rate limit - check the logged error above")
+            if not args.allow_placeholders:
+                sys.exit("!! refusing to continue; pass --allow-placeholders to override")
 
     # 6. Validate before rendering - a contract violation inside a <template>
     #    fails quietly, so never go straight to render.
