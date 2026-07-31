@@ -477,7 +477,7 @@ async def _generate_frame_compositions_local(board: Storyboard, video_dir: Path)
     import httpx
 
     from app.archetypes import render_archetype
-    from app.localllm import OLLAMA_TIMEOUT, heuristic_plan, plan_frame
+    from app.localllm import OLLAMA_TIMEOUT, plan_frame
 
     frames_dir = video_dir / "compositions" / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
@@ -486,15 +486,14 @@ async def _generate_frame_compositions_local(board: Storyboard, video_dir: Path)
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
 
         async def build(frame: Frame) -> None:
-            fallback = heuristic_plan(frame.voiceover, frame.scene, frame.title)
-            plan = await plan_frame(
+            plan, used_fallback = await plan_frame(
                 voiceover=frame.voiceover,
                 scene=frame.scene,
                 title=frame.title,
                 direction=board.direction,
                 client=client,
             )
-            if plan == fallback:
+            if used_fallback:
                 degraded.append(frame.slug)
             (frames_dir / f"{frame.slug}.html").write_text(
                 render_archetype(frame.slug, frame.duration, plan), encoding="utf-8"

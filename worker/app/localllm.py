@@ -99,24 +99,34 @@ def heuristic_plan(voiceover: str, scene: str, title: str) -> dict:
     }
 
 
-def _validate(plan: dict, voiceover: str, scene: str, title: str) -> dict:
-    """Reject a plan naming an unknown archetype or carrying no slots."""
+def _validate(plan: dict, voiceover: str, scene: str, title: str) -> tuple[dict, bool]:
+    """Reject a plan naming an unknown archetype or carrying no slots.
+
+    Returns ``(plan, used_fallback)`` — see :func:`plan_frame`.
+    """
     if not isinstance(plan, dict):
-        return heuristic_plan(voiceover, scene, title)
+        return heuristic_plan(voiceover, scene, title), True
     name = plan.get("archetype")
     if name not in ARCHETYPES:
         log.warning("unknown_archetype", requested=name)
-        return heuristic_plan(voiceover, scene, title)
+        return heuristic_plan(voiceover, scene, title), True
     if not isinstance(plan.get("slots"), dict) or not plan["slots"]:
         log.warning("archetype_missing_slots", archetype=name)
-        return heuristic_plan(voiceover, scene, title)
-    return plan
+        return heuristic_plan(voiceover, scene, title), True
+    return plan, False
 
 
 async def plan_frame(
     voiceover: str, scene: str, title: str, direction: str = "", client: httpx.AsyncClient | None = None
-) -> dict:
-    """Ask the local model for one frame's archetype and slots."""
+) -> tuple[dict, bool]:
+    """Ask the local model for one frame's archetype and slots.
+
+    Returns ``(plan, used_fallback)``. A frame always gets a shape, so callers
+    can render unconditionally, but the flag says whether the model actually
+    produced it. Callers must not infer this by comparing the plan to
+    ``heuristic_plan`` — the model legitimately agrees with the heuristic on
+    simple frames, and counting those as failures can abort a sound video.
+    """
     user_prompt = (
         f"GLOBAL DIRECTION: {direction or 'Clean, bold, 3D finance explainer.'}\n"
         f"FRAME TITLE: {title}\n"
@@ -141,7 +151,7 @@ async def plan_frame(
         raw = response.json().get("response", "")
     except Exception as exc:
         log.warning("ollama_unavailable", error=str(exc)[:160], fallback="heuristic")
-        return heuristic_plan(voiceover, scene, title)
+        return heuristic_plan(voiceover, scene, title), True
     finally:
         if owns_client:
             await client.aclose()
@@ -149,7 +159,7 @@ async def plan_frame(
     plan = _extract_json(raw)
     if plan is None:
         log.warning("ollama_unparseable_response", sample=raw[:160])
-        return heuristic_plan(voiceover, scene, title)
+        return heuristic_plan(voiceover, scene, title), True
     return _validate(plan, voiceover, scene, title)
 
 
