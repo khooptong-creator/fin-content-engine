@@ -17,7 +17,7 @@ from app.youtube import (
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
 @patch("app.youtube._generate_frame_audio")
-@patch("app.youtube._generate_frame_compositions")
+@patch("app.youtube._build_frames")
 @patch("app.youtube.subprocess.run")
 async def test_generate_youtube_video_manual(
     mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
@@ -52,7 +52,7 @@ async def test_generate_youtube_video_manual(
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
 @patch("app.youtube._generate_frame_audio")
-@patch("app.youtube._generate_frame_compositions")
+@patch("app.youtube._build_frames")
 @patch("app.youtube.subprocess.run")
 async def test_generate_youtube_video_auto_status(
     mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
@@ -80,7 +80,11 @@ async def test_generate_youtube_video_auto_status(
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
 @patch("app.youtube._generate_frame_audio")
-@patch("app.youtube._generate_frame_compositions")
+# Patch the dispatcher, not a backend: the guard under test is about the
+# placeholder ratio, which is the same whichever backend produced the frames.
+# Patching a backend directly lets FRAME_BACKEND silently route around the mock
+# and fire a live request at whatever the local one talks to.
+@patch("app.youtube._build_frames")
 @patch("app.youtube.subprocess.run")
 async def test_generation_aborts_when_most_frames_are_placeholders(
     mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
