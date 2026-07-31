@@ -40,6 +40,8 @@ ARCHETYPES:
 ACCENTS: accent (neutral highlight), positive (good/growth), warning (caution), negative (loss/cost).
 
 RULES:
+- Every slot value must be written in ENGLISH. The model is bilingual and the
+  audience is not; a single Chinese word on screen ruins the frame.
 - Output ONE JSON object and nothing else. No markdown fence, no commentary.
 - Shape: {{"archetype": "<name>", "slots": {{...}}}}
 - Copy on screen is not the narration. Compress it: short, punchy, scannable.
@@ -63,6 +65,18 @@ def _extract_json(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+_CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯]")
+
+
+def _has_cjk(plan: dict) -> bool:
+    """Whether any slot text drifted out of English.
+
+    qwen2.5 is bilingual and will answer in Chinese when a slot description is
+    ambiguous, which puts untranslated words on screen for an English audience.
+    """
+    return bool(_CJK.search(json.dumps(plan.get("slots", {}), ensure_ascii=False)))
 
 
 def heuristic_plan(voiceover: str, scene: str, title: str) -> dict:
@@ -184,16 +198,30 @@ async def plan_frame(
             return heuristic_plan(voiceover, scene, title), True
         plan, fell_back = _validate(plan, voiceover, scene, title)
 
-        # Naming spent shapes in prose is a weak signal at 7B. If it repeated one
-        # anyway and fresh shapes exist, ask again with those removed from the
-        # menu outright — it cannot repeat what it cannot see.
-        if not fell_back and unused and plan.get("archetype") in spent:
-            log.info("archetype_repeat_retry", repeated=plan["archetype"], unused=unused)
-            retry_raw, _ = await _ask(client, base_prompt, exclude=spent)
+        # Two reasons to ask again, both invisible to _validate because the plan
+        # is structurally fine: it reused a shape already spent on this video, or
+        # it answered in Chinese. Excluding spent shapes is the stronger fix for
+        # the first — it cannot repeat what it cannot see.
+        repeated = bool(unused) and plan.get("archetype") in spent
+        drifted = _has_cjk(plan)
+        if not fell_back and (repeated or drifted):
+            log.info(
+                "frame_plan_retry",
+                repeated=plan.get("archetype") if repeated else None,
+                non_english=drifted,
+            )
+            retry_prompt = base_prompt
+            if drifted:
+                retry_prompt += "\nWrite every slot value in English only."
+            retry_raw, _ = await _ask(
+                client, retry_prompt, exclude=spent if repeated else ()
+            )
             retry_plan = _extract_json(retry_raw) if retry_raw else None
             if retry_plan is not None:
                 candidate, candidate_fell_back = _validate(retry_plan, voiceover, scene, title)
-                if not candidate_fell_back:
+                # Only take the retry if it fixed the drift; a second Chinese
+                # answer is not an improvement on the first.
+                if not candidate_fell_back and not _has_cjk(candidate):
                     return candidate, False
         return plan, fell_back
     finally:

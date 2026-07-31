@@ -29,6 +29,10 @@ VIDEOS_DIR = Path(os.environ.get("VIDEOS_DIR", "../videos")).resolve()
 # story, so generation aborts instead of producing something publishable.
 MAX_PLACEHOLDER_RATIO = float(os.environ.get("MAX_PLACEHOLDER_RATIO", "0.25"))
 
+# Narration carries the explainer, so the bar is stricter than for visuals: a
+# quarter of a video can survive fallback cards, but not a quarter in silence.
+MAX_SILENT_RATIO = float(os.environ.get("MAX_SILENT_RATIO", "0.2"))
+
 
 def _get_youtube_credentials(scopes: list[str]) -> Any:
     """
@@ -94,7 +98,22 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
         return None
 
     log.info("youtube_audio_generation_started", video_dir=str(video_dir), frames=len(board.frames))
-    await _generate_frame_audio(board, video_dir, script_content)
+    silenced = await _generate_frame_audio(board, video_dir, script_content)
+    if silenced:
+        # Silence renders and validates exactly like narration, so nothing
+        # downstream notices. A mostly-mute explainer is not the video the story
+        # asked for; refuse it here rather than publish it.
+        ratio = len(silenced) / len(board.frames)
+        log.error(
+            "narration_degraded",
+            story_id=str(story_id),
+            silenced=len(silenced),
+            frames=len(board.frames),
+            slugs=silenced,
+        )
+        if ratio > MAX_SILENT_RATIO:
+            log.error("youtube_generation_aborted", reason="too_many_silent_frames")
+            return None
 
     prune_stale_assets(board, video_dir)
     attach_audio(board, video_dir)

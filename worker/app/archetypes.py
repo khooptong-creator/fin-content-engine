@@ -427,9 +427,23 @@ ARCHETYPES: dict[str, Archetype] = {
     ),
     "bar_chart": Archetype(
         name="bar_chart",
-        purpose="Compare 2-4 magnitudes visually.",
+        purpose=(
+            "Compare 2-4 real quantities of the SAME unit, where the bar heights "
+            "themselves carry the point (Rs 50,000 vs Rs 150,000; year 1 vs year 15). "
+            "Do not pick this unless the narration gives you comparable numbers "
+            "for every bar — use stat_reveal for one number, list_build for "
+            "points that are not quantities."
+        ),
         slots={"headline": "string, max 10 words",
-               "bars": "array of 2-4 objects {label, value (number), display (string)}",
+               "bars": (
+                   "array of 2-4 objects {label, value, display}. "
+                   "label = what the bar IS, max 3 words, a noun not a sentence "
+                   "(e.g. 'Borrowed', 'Repaid' — never 'Stack Shrinks Slowly'). "
+                   "value = a bare number, same unit across every bar, used only "
+                   "for relative height. display = that number as the viewer "
+                   "should read it (e.g. 'Rs 1.5L', '15 yrs'). "
+                   "Never emit a bare unit like 'yr' or '%' as a label."
+               ),
                "accent": "accent|positive|warning|negative"},
         build=_bar_chart,
     ),
