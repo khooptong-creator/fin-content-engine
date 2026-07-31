@@ -33,32 +33,39 @@
       color: #F8FAFC;
     }
     [id="f04-the-real-cost-headline"] {
-      font-size: 5.5cqw; font-weight: 700; line-height: 1.3; color: #CBD5E1;
+      font-size: 6.5cqw; font-weight: 800; line-height: 1.2; margin-bottom: 2cqh;
+      color: #F8FAFC;
     }
-    [id="f04-the-real-cost-card"] {
-      background: #1B2A4A; border-radius: 4cqw; padding: 6cqh 8cqw;
-      box-shadow: 0 2cqh 6cqh rgba(0,0,0,0.45);
-      display: flex; flex-direction: column; align-items: center; gap: 2cqh;
+    [id="f04-the-real-cost-list"] {
+      display: flex; flex-direction: column; gap: 2.5cqh; width: 100%;
+      transform-style: preserve-3d;
     }
-    [id="f04-the-real-cost-value"] {
-      font-size: 20cqw; font-weight: 800; line-height: 1; color: #F87171;
-      letter-spacing: -0.04em;
+    .f04-the-real-cost-item {
+      display: flex; flex-direction: row; align-items: center; gap: 3cqw;
+      background: #1B2A4A; border-radius: 2.5cqw; padding: 3cqh 4cqw;
+      text-align: left;
     }
-    [id="f04-the-real-cost-label"] {
-      font-size: 4.5cqw; font-weight: 600; color: #F8FAFC; text-transform: uppercase;
-      letter-spacing: 0.08em;
+    .f04-the-real-cost-bullet {
+      width: 3cqw; height: 3cqw; border-radius: 50%; background: #F87171; flex: none;
     }
+    .f04-the-real-cost-item-text { font-size: 4.8cqw; font-weight: 600; line-height: 1.3; color: #F8FAFC; }
   </style>
 
   <div id="f04-the-real-cost-root" data-composition-id="f04-the-real-cost"
-       data-width="1080" data-height="1920" data-duration="7.098">
+       data-width="1080" data-height="1920" data-duration="7.463">
     <div class="clip" id="f04-the-real-cost-bg" data-start="0"
-         data-duration="7.098" data-track-index="0"></div>
+         data-duration="7.463" data-track-index="0"></div>
     <div id="f04-the-real-cost-stage">
-      <div id="f04-the-real-cost-headline">Triple the cost</div>
-      <div id="f04-the-real-cost-card">
-        <div id="f04-the-real-cost-value">Rs 150,000</div>
-        <div id="f04-the-real-cost-label">total price</div>
+      <div id="f04-the-real-cost-headline">Triple the Cost</div>
+      <div id="f04-the-real-cost-list">
+        <div id="f04-the-real-cost-item-0" class="f04-the-real-cost-item">
+          <div class="f04-the-real-cost-bullet"></div>
+          <div class="f04-the-real-cost-item-text">Rs 50,000</div>
+        </div>
+        <div id="f04-the-real-cost-item-1" class="f04-the-real-cost-item">
+          <div class="f04-the-real-cost-bullet"></div>
+          <div class="f04-the-real-cost-item-text">Turns to Rs 150,000</div>
+        </div>
       </div>
     </div>
   </div>
@@ -70,12 +77,12 @@
       tl.fromTo('[id="f04-the-real-cost-headline"]',
         { opacity: 0, y: 40 },
         { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
-      tl.fromTo('[id="f04-the-real-cost-card"]',
-        { opacity: 0, scale: 0.75, rotateX: -30, z: -200 },
-        { opacity: 1, scale: 1, rotateX: 0, z: 0, duration: 0.9, ease: "back.out(1.4)" }, 0.35);
-      tl.fromTo('[id="f04-the-real-cost-value"]',
-        { opacity: 0, scale: 0.6 },
-        { opacity: 1, scale: 1, duration: 0.6, ease: "back.out(2)" }, 0.7);
+      tl.fromTo('[id="f04-the-real-cost-item-0"]',
+        { opacity: 0, x: -70, z: -120 },
+        { opacity: 1, x: 0, z: 0, duration: 0.55, ease: "power3.out" }, 0.5);
+      tl.fromTo('[id="f04-the-real-cost-item-1"]',
+        { opacity: 0, x: -70, z: -120 },
+        { opacity: 1, x: 0, z: 0, duration: 0.55, ease: "power3.out" }, 1.05);
     })();
   </script>
 </template>

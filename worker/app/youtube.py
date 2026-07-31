@@ -526,6 +526,10 @@ async def _generate_frame_compositions_local(board: Storyboard, video_dir: Path)
 
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
 
+        # Each frame is planned in isolation, so without this the model reaches
+        # for the same shape every time and the video reads as one slide repeated.
+        used_archetypes: list[str] = []
+
         async def build(frame: Frame) -> None:
             plan, used_fallback = await plan_frame(
                 voiceover=frame.voiceover,
@@ -533,9 +537,11 @@ async def _generate_frame_compositions_local(board: Storyboard, video_dir: Path)
                 title=frame.title,
                 direction=board.direction,
                 client=client,
+                used_archetypes=used_archetypes,
             )
             if used_fallback:
                 degraded.append(frame.slug)
+            used_archetypes.append(plan.get("archetype", ""))
             (frames_dir / f"{frame.slug}.html").write_text(
                 render_archetype(frame.slug, frame.duration, plan), encoding="utf-8"
             )

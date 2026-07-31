@@ -32,41 +32,25 @@
       font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
       color: #F8FAFC;
     }
-    [id="f05-the-smart-way-out-headline"] {
-      font-size: 6cqw; font-weight: 800; line-height: 1.25; color: #F8FAFC;
+    [id="f05-the-smart-way-out-mark"] {
+      font-size: 16cqw; font-weight: 800; line-height: 0.8; color: #34D399;
     }
-    [id="f05-the-smart-way-out-row"] {
-      display: flex; flex-direction: row; gap: 4cqw; width: 100%;
-      transform-style: preserve-3d;
+    [id="f05-the-smart-way-out-text"] {
+      font-size: 7cqw; font-weight: 700; line-height: 1.3; color: #F8FAFC;
     }
-    [id="f05-the-smart-way-out-left"], [id="f05-the-smart-way-out-right"] {
-      flex: 1; background: #1B2A4A; border-radius: 3cqw; padding: 4cqh 3cqw;
-      display: flex; flex-direction: column; align-items: center; gap: 2cqh;
-      box-shadow: 0 1.5cqh 4cqh rgba(0,0,0,0.4);
+    [id="f05-the-smart-way-out-attribution"] {
+      font-size: 4cqw; font-weight: 600; color: #CBD5E1; letter-spacing: 0.06em;
     }
-    [id="f05-the-smart-way-out-left-title"], [id="f05-the-smart-way-out-right-title"] {
-      font-size: 4cqw; font-weight: 700; color: #CBD5E1;
-    }
-    [id="f05-the-smart-way-out-left-value"] { font-size: 11cqw; font-weight: 800; color: #F87171; }
-    [id="f05-the-smart-way-out-right-value"] { font-size: 11cqw; font-weight: 800; color: #34D399; }
   </style>
 
   <div id="f05-the-smart-way-out-root" data-composition-id="f05-the-smart-way-out"
-       data-width="1080" data-height="1920" data-duration="5.191">
+       data-width="1080" data-height="1920" data-duration="5.165">
     <div class="clip" id="f05-the-smart-way-out-bg" data-start="0"
-         data-duration="5.191" data-track-index="0"></div>
+         data-duration="5.165" data-track-index="0"></div>
     <div id="f05-the-smart-way-out-stage">
-      <div id="f05-the-smart-way-out-headline">Pay Full Balance</div>
-      <div id="f05-the-smart-way-out-row">
-        <div id="f05-the-smart-way-out-left">
-          <div id="f05-the-smart-way-out-left-title">Minimum</div>
-          <div id="f05-the-smart-way-out-left-value">Just Enough</div>
-        </div>
-        <div id="f05-the-smart-way-out-right">
-          <div id="f05-the-smart-way-out-right-title">Full</div>
-          <div id="f05-the-smart-way-out-right-value">Keep More</div>
-        </div>
-      </div>
+      <div id="f05-the-smart-way-out-mark">&ldquo;</div>
+      <div id="f05-the-smart-way-out-text">Always pay full balance for smart savings.</div>
+      <div id="f05-the-smart-way-out-attribution"></div>
     </div>
   </div>
 
@@ -74,15 +58,15 @@
     (function () {
       const tl = gsap.timeline({ paused: true });
       window.__timelines["f05-the-smart-way-out"] = tl;
-      tl.fromTo('[id="f05-the-smart-way-out-headline"]',
-        { opacity: 0, y: 40 },
-        { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
-      tl.fromTo('[id="f05-the-smart-way-out-left"]',
-        { opacity: 0, x: -120, rotateY: 35 },
-        { opacity: 1, x: 0, rotateY: 0, duration: 0.8, ease: "power3.out" }, 0.4);
-      tl.fromTo('[id="f05-the-smart-way-out-right"]',
-        { opacity: 0, x: 120, rotateY: -35 },
-        { opacity: 1, x: 0, rotateY: 0, duration: 0.8, ease: "power3.out" }, 0.6);
+      tl.fromTo('[id="f05-the-smart-way-out-mark"]',
+        { opacity: 0, scale: 0.4 },
+        { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(2)" }, 0);
+      tl.fromTo('[id="f05-the-smart-way-out-text"]',
+        { opacity: 0, y: 50, rotateX: -20 },
+        { opacity: 1, y: 0, rotateX: 0, duration: 0.8, ease: "power3.out" }, 0.25);
+      tl.fromTo('[id="f05-the-smart-way-out-attribution"]',
+        { opacity: 0 },
+        { opacity: 1, duration: 0.5, ease: "power1.out" }, 0.8);
     })();
   </script>
 </template>

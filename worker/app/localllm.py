@@ -15,6 +15,8 @@ import json
 import os
 import re
 
+from typing import Sequence
+
 import httpx
 import structlog
 
@@ -116,8 +118,33 @@ def _validate(plan: dict, voiceover: str, scene: str, title: str) -> tuple[dict,
     return plan, False
 
 
+async def _ask(
+    client: httpx.AsyncClient, user_prompt: str, exclude: Sequence[str]
+) -> tuple[str | None, str]:
+    """One Ollama round trip. Returns (raw_response, error) — never raises."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": user_prompt,
+        "system": SYSTEM_PROMPT.format(catalogue=catalogue_for_prompt(exclude)),
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.4, "num_predict": 400},
+    }
+    try:
+        response = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
+        response.raise_for_status()
+        return response.json().get("response", ""), ""
+    except Exception as exc:
+        return None, str(exc)[:160]
+
+
 async def plan_frame(
-    voiceover: str, scene: str, title: str, direction: str = "", client: httpx.AsyncClient | None = None
+    voiceover: str,
+    scene: str,
+    title: str,
+    direction: str = "",
+    client: httpx.AsyncClient | None = None,
+    used_archetypes: Sequence[str] = (),
 ) -> tuple[dict, bool]:
     """Ask the local model for one frame's archetype and slots.
 
@@ -127,40 +154,51 @@ async def plan_frame(
     ``heuristic_plan`` — the model legitimately agrees with the heuristic on
     simple frames, and counting those as failures can abort a sound video.
     """
-    user_prompt = (
+    spent = list(dict.fromkeys(used_archetypes))
+    unused = [n for n in ARCHETYPES if n not in spent]
+
+    base_prompt = (
         f"GLOBAL DIRECTION: {direction or 'Clean, bold, 3D finance explainer.'}\n"
         f"FRAME TITLE: {title}\n"
         f"SCENE DESCRIPTION: {scene}\n"
-        f"NARRATION SPOKEN OVER THIS FRAME: \"{voiceover}\"\n\n"
-        "Design this frame."
+        f"NARRATION SPOKEN OVER THIS FRAME: \"{voiceover}\"\n"
     )
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": user_prompt,
-        "system": SYSTEM_PROMPT.format(catalogue=catalogue_for_prompt()),
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.4, "num_predict": 400},
-    }
+    if spent:
+        base_prompt += (
+            f"ALREADY USED EARLIER IN THIS VIDEO: {', '.join(spent)}. "
+            "Pick a different shape unless the narration truly demands a repeat.\n"
+        )
+    base_prompt += "\nDesign this frame."
 
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=OLLAMA_TIMEOUT)
     try:
-        response = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-        response.raise_for_status()
-        raw = response.json().get("response", "")
-    except Exception as exc:
-        log.warning("ollama_unavailable", error=str(exc)[:160], fallback="heuristic")
-        return heuristic_plan(voiceover, scene, title), True
+        raw, error = await _ask(client, base_prompt, exclude=())
+        if raw is None:
+            log.warning("ollama_unavailable", error=error, fallback="heuristic")
+            return heuristic_plan(voiceover, scene, title), True
+
+        plan = _extract_json(raw)
+        if plan is None:
+            log.warning("ollama_unparseable_response", sample=raw[:160])
+            return heuristic_plan(voiceover, scene, title), True
+        plan, fell_back = _validate(plan, voiceover, scene, title)
+
+        # Naming spent shapes in prose is a weak signal at 7B. If it repeated one
+        # anyway and fresh shapes exist, ask again with those removed from the
+        # menu outright — it cannot repeat what it cannot see.
+        if not fell_back and unused and plan.get("archetype") in spent:
+            log.info("archetype_repeat_retry", repeated=plan["archetype"], unused=unused)
+            retry_raw, _ = await _ask(client, base_prompt, exclude=spent)
+            retry_plan = _extract_json(retry_raw) if retry_raw else None
+            if retry_plan is not None:
+                candidate, candidate_fell_back = _validate(retry_plan, voiceover, scene, title)
+                if not candidate_fell_back:
+                    return candidate, False
+        return plan, fell_back
     finally:
         if owns_client:
             await client.aclose()
-
-    plan = _extract_json(raw)
-    if plan is None:
-        log.warning("ollama_unparseable_response", sample=raw[:160])
-        return heuristic_plan(voiceover, scene, title), True
-    return _validate(plan, voiceover, scene, title)
 
 
 async def is_available() -> bool:

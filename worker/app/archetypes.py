@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterable
 
 # Palette. Text on ground/surface is `TEXT`; text on any accent fill is `GROUND`.
 # Every pairing used below clears WCAG AA at the sizes these templates use.
@@ -458,10 +458,20 @@ def render_archetype(slug: str, duration: float, spec: dict) -> str:
     return _shell(slug, duration, body, css, js)
 
 
-def catalogue_for_prompt() -> str:
-    """The archetype menu, rendered for an LLM system prompt."""
+def catalogue_for_prompt(exclude: Iterable[str] = ()) -> str:
+    """The archetype menu, rendered for an LLM system prompt.
+
+    `exclude` drops shapes already spent on this video. Naming them is a
+    stronger signal than asking for variety in prose: a 7B plans each frame in
+    isolation and will otherwise reach for the same shape every time.
+    Never excludes everything — the last archetype standing stays on the menu.
+    """
+    blocked = set(exclude)
+    remaining = [a for a in ARCHETYPES.values() if a.name not in blocked]
+    if not remaining:
+        remaining = list(ARCHETYPES.values())
     lines = []
-    for archetype in ARCHETYPES.values():
+    for archetype in remaining:
         slot_desc = ", ".join(f"{k} ({v})" for k, v in archetype.slots.items())
         lines.append(f"- {archetype.name}: {archetype.purpose}\n    slots: {slot_desc}")
     return "\n".join(lines)
