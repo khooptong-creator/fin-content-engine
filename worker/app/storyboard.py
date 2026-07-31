@@ -82,12 +82,32 @@ class Frame:
     # Filled in by assign_timing().
     start: float = 0.0
     duration: float = 0.0
+    # Offset of the narration inside the frame. The visual lands first and the
+    # voice follows, so the cut never coincides with the first syllable.
+    voice_offset: float = 0.0
+
+    @property
+    def voice_duration(self) -> float:
+        """The audio element's own length, which is not the frame's length.
+
+        The frame is padded with silence at both ends; the audio is not. Giving
+        the audio element the padded duration makes the renderer clamp it back
+        to the media length and warn.
+        """
+        return self.audio_duration or self.duration
 
     @property
     def slug(self) -> str:
-        """Stable id used for the composition id, filename, and element ids."""
+        """Stable id used for the composition id, filename, and element ids.
+
+        Leading "f" is load-bearing: element ids derive from this, and an id
+        starting with a digit makes `#01-hook` an invalid CSS selector that
+        throws a SyntaxError in querySelector(). Generated frames reach for
+        `#id` selectors naturally, so the hazard is removed at the source
+        rather than defended against in every frame.
+        """
         base = re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")
-        return f"{self.index:02d}-{base or 'frame'}"
+        return f"f{self.index:02d}-{base or 'frame'}"
 
     @property
     def voice_filename(self) -> str:
@@ -331,8 +351,40 @@ def assign_timing(board: Storyboard, pacing: Pacing | str | None = None) -> Stor
     for frame in board.frames:
         frame.duration = round(resolve_frame_duration(frame, resolved), 3)
         frame.start = round(cursor, 3)
+        frame.voice_offset = round(resolved.lead_in, 3) if frame.audio_duration else 0.0
         cursor += frame.duration
     return board
+
+
+def prune_stale_assets(board: Storyboard, video_dir: Path) -> int:
+    """Delete frame/voice files left over from a previous compile of this project.
+
+    Regenerating a video can rename frames (a retitled scene changes its slug).
+    Orphans are not harmless: `hyperframes check` validates every file in the
+    frames directory, so stale ones report findings against a video that no
+    longer contains them.
+    """
+    removed = 0
+    expected_frames = {f"{frame.slug}.html" for frame in board.frames}
+    expected_voice = {Path(frame.voice_filename).name for frame in board.frames}
+
+    frames_dir = video_dir / "compositions" / "frames"
+    if frames_dir.is_dir():
+        for path in frames_dir.glob("*.html"):
+            if path.name not in expected_frames:
+                path.unlink()
+                removed += 1
+
+    voice_dir = video_dir / "assets" / "voice"
+    if voice_dir.is_dir():
+        for path in voice_dir.iterdir():
+            if path.is_file() and path.name not in expected_voice:
+                path.unlink()
+                removed += 1
+
+    if removed:
+        log.info("pruned_stale_assets", count=removed, video_dir=str(video_dir))
+    return removed
 
 
 def attach_audio(board: Storyboard, video_dir: Path) -> Storyboard:
@@ -418,8 +470,8 @@ _SCENE_TEMPLATE = """      <div
       <audio
         id="el-{slug}-voice"
         src="{voice}"
-        data-start="{start}"
-        data-duration="{duration}"
+        data-start="{voice_start}"
+        data-duration="{voice_duration}"
         data-track-index="{track_voice}"
         data-volume="1"
       ></audio>
@@ -447,6 +499,8 @@ def render_index_html(board: Storyboard, ground: str = "#0B1220", with_bgm: bool
             start=frame.start,
             duration=frame.duration,
             voice=frame.voice_filename,
+            voice_start=round(frame.start + frame.voice_offset, 3),
+            voice_duration=round(frame.voice_duration, 3),
             track_scene=TRACK_SCENE,
             track_voice=TRACK_VOICE,
         )

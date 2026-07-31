@@ -16,6 +16,7 @@ from app.storyboard import (
     assign_timing,
     attach_audio,
     parse_storyboard,
+    prune_stale_assets,
     render_index_html,
 )
 
@@ -91,6 +92,7 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     log.info("youtube_audio_generation_started", video_dir=str(video_dir), frames=len(board.frames))
     await _generate_frame_audio(board, video_dir, script_content)
 
+    prune_stale_assets(board, video_dir)
     attach_audio(board, video_dir)
     assign_timing(board, board.meta.get("pacing"))
 

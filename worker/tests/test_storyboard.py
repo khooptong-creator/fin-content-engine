@@ -75,7 +75,7 @@ def test_parses_hand_authored_dialect():
     assert hook.voiceover == "There is no such thing as a No Cost EMI."
     assert hook.declared_duration == 4.5
     assert len(hook.shots) == 2
-    assert hook.slug == "01-hook"
+    assert hook.slug == "f01-hook"
 
 
 def test_parses_gemini_dialect():
@@ -105,7 +105,7 @@ def test_duplicate_scene_numbers_are_renumbered():
     assert [f.index for f in board.frames] == [1, 2, 3]
     # Unnamed frames fall back to the index alone, so a renumbered frame can
     # never carry a slug that contradicts its position.
-    assert [f.slug for f in board.frames] == ["01-frame", "02-frame", "03-frame"]
+    assert [f.slug for f in board.frames] == ["f01-frame", "f02-frame", "f03-frame"]
 
 
 def _timed_board() -> Storyboard:
@@ -191,6 +191,32 @@ def test_unknown_pacing_profile_falls_back_instead_of_crashing():
     """An LLM writing `pacing: snappy` must not take down the render."""
     board = parse_storyboard('---\ntitle: "T"\npacing: snappy\n---\n\n# Scene 1\nVoiceover: "a"\n')
     assert resolve_pacing(None, board) is PACING_PROFILES["explainer"]
+
+
+def test_voice_fits_inside_its_frame_without_being_clamped():
+    """The audio slot is its own length; padding belongs to the frame, not the voice.
+
+    Giving the audio element the padded frame duration makes the renderer clamp
+    it back to the media length and emit a clip_media_fit warning.
+    """
+    board = Storyboard(meta={"title": "T"})
+    board.frames = [Frame(index=1, title="Hook", audio_duration=5.0)]
+    assign_timing(board, "explainer")
+    frame = board.frames[0]
+
+    html = render_index_html(board)
+    assert 'data-duration="5.0"' in html  # the audio element, not the frame
+    # Voice starts after the lead-in and still ends inside the frame.
+    assert frame.voice_offset > 0
+    assert frame.voice_offset + frame.voice_duration <= frame.duration
+
+
+def test_silent_frame_voice_is_not_offset():
+    board = Storyboard(meta={"title": "T"})
+    board.frames = [Frame(index=1, title="Silent", declared_duration=5.0)]
+    assign_timing(board, "explainer")
+
+    assert board.frames[0].voice_offset == 0.0
 
 
 def test_index_html_satisfies_composition_contract():
