@@ -340,6 +340,18 @@ async def create_or_join_story(
     return story_id
 
 
+async def create_manual_story(headline: str) -> uuid.UUID:
+    """Create a manual story without items for the autopilot."""
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        row = await _fetchone(
+            conn,
+            "INSERT INTO stories (headline, status) VALUES (%s, 'inbox') RETURNING id",
+            headline,
+        )
+        return row["id"]
+
+
 # ---------------------------------------------------------------------------
 # Vector search — HNSW-backed similarity (production uses approx; test uses exact)
 # ---------------------------------------------------------------------------
@@ -532,7 +544,119 @@ async def stats() -> dict[str, Any]:
         "clustering": {"precision_last_test": None, "recall_last_test": None},
         "without_embedding_fraction": (without / total) if total else 0.0,
     }
+# ---------------------------------------------------------------------------
+# API Data Fetchers (Inbox & Drafts)
+# ---------------------------------------------------------------------------
 
+async def get_pending_stories() -> list[dict[str, Any]]:
+    """Fetch stories with status 'inbox', along with their linked items."""
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        # Fetch inbox stories
+        stories = await _fetchall(
+            conn,
+            "SELECT id, headline, status, created_at FROM stories WHERE status = 'inbox' ORDER BY created_at DESC"
+        )
+        
+        # For each story, fetch its items
+        for story in stories:
+            items = await _fetchall(
+                conn,
+                """
+                SELECT i.id, i.title, i.url, s.name as source_name, i.published_at 
+                FROM items i
+                JOIN story_items si ON i.id = si.item_id
+                JOIN sources s ON i.source_id = s.id
+                WHERE si.story_id = %s
+                ORDER BY i.published_at DESC
+                """,
+                story["id"]
+            )
+            story["items"] = items
+            
+    return stories
+
+
+async def get_drafts() -> list[dict[str, Any]]:
+    """Fetch all drafts (rendered or pending upload)."""
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        drafts = await _fetchall(
+            conn,
+            """
+            SELECT d.id, d.story_id, s.headline, d.platform, d.format, 
+                   d.body->>'channel_id' AS channel_id, 
+                   d.body->>'upload_preference' AS upload_preference, 
+                   d.body, d.status, d.created_at, d.published_ids
+            FROM drafts d
+            JOIN stories s ON d.story_id = s.id
+            ORDER BY d.created_at DESC
+            """
+        )
+    return drafts
+
+
+async def get_draft(draft_id: uuid.UUID) -> dict[str, Any] | None:
+    """Fetch a single draft by id, joined with its story headline."""
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        row = await _fetchone(
+            conn,
+            """
+            SELECT d.id, d.story_id, s.headline, d.platform, d.format,
+                   d.body->>'channel_id' AS channel_id,
+                   d.body->>'upload_preference' AS upload_preference,
+                   d.body, d.status, d.created_at, d.published_ids
+            FROM drafts d
+            JOIN stories s ON d.story_id = s.id
+            WHERE d.id = %s
+            """,
+            draft_id,
+        )
+    return row
+
+
+async def update_draft_published(
+    draft_id: uuid.UUID,
+    *,
+    status: str,
+    published_ids: dict[str, str],
+) -> None:
+    """Update a draft's status and published_ids after a successful upload."""
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        await conn.execute(
+            """
+            UPDATE drafts
+            SET status = %s, published_ids = %s::jsonb
+            WHERE id = %s
+            """,
+            (status, _dumps(published_ids), draft_id),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+async def get_config(key: str) -> dict[str, Any] | None:
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        row = await _fetchone(conn, "SELECT value FROM config WHERE key = %s", key)
+    return row["value"] if row else None
+
+
+async def set_config(key: str, value: dict[str, Any]) -> None:
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO config (key, value)
+            VALUES (%s, %s::jsonb)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            (key, _dumps(value)),
+        )
 
 # ---------------------------------------------------------------------------
 # Helpers

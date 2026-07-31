@@ -38,6 +38,15 @@ supabase/functions/embed/node_modules/
 # Stray artifact from earlier shell invocation
 nul
 
-# Unrelated pre-existing file
+# Unrelated pre-existing files (local briefs / prompts)
 PROMPT.txt
+Content Creation Project folder con.txt
+
+# Video workspaces: track the source (STORYBOARD.md, compositions/*.html,
+# frame.md, hyperframes.json), never the rendered or generated binaries.
 videos/local-test/
+videos/**/renders/
+videos/**/assets/voice/
+*.mp4
+*.wav
+*.mp3

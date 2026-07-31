@@ -10,6 +10,7 @@ Two-tier config (§2.5):
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,6 +43,11 @@ class Settings(BaseSettings):
     # --- Worker runtime ---
     scheduler_max_workers: int = 4
     log_level: str = "INFO"
+
+    # --- YouTube Data API (Phase 4) ---
+    youtube_token_path: Path = Path("token.json")
+    youtube_client_secrets_path: Path = Path("client_secret.json")
+    youtube_channel_id: str = ""
 
     # --- Test/dev only ---
     # When true, `app.embed` returns a deterministic hash-derived vector instead

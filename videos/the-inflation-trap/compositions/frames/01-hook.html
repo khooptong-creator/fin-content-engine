@@ -1,0 +1,178 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Space Grotesk';
+      font-weight: 500;
+      src: url('assets/fonts/SpaceGrotesk-Medium.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Space Grotesk';
+      font-weight: 600;
+      src: url('assets/fonts/SpaceGrotesk-SemiBold.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Space Grotesk';
+      font-weight: 700;
+      src: url('assets/fonts/SpaceGrotesk-Bold.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      src: url('assets/fonts/Inter-Regular.woff2') format('woff2');
+    }
+
+    #root {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      container-type: size;
+      overflow: hidden;
+    }
+
+    .clip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    [id="01-hook-bg"] {
+      background-color: #fdfae7;
+    }
+
+    [id="01-hook-content-area"] {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 83cqh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 25cqh;
+    }
+
+    [id="01-hook-slip"] {
+      position: relative;
+      width: 75cqw;
+      height: 95cqw;
+      background-color: rgba(30, 43, 250, 0.04);
+      border: 1.5px solid rgba(30, 43, 250, 0.2);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 10cqw;
+    }
+
+    [id="01-hook-slip-title"] {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600;
+      font-size: 2.8cqw;
+      color: #1e2bfa;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 2.5cqw;
+    }
+
+    [id="01-hook-slip-amount"] {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 14cqw;
+      color: #111111;
+      line-height: 1.0;
+      margin-bottom: 2.5cqw;
+    }
+
+    [id="01-hook-slip-raise"] {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 4.5cqw;
+      color: #059669;
+    }
+
+    [id="01-hook-slip-lines"] {
+      display: flex;
+      flex-direction: column;
+      gap: 2cqw;
+      margin-top: 10cqw;
+      width: 75%;
+    }
+
+    [class~="01-hook-line"] {
+      height: 1.5cqw;
+      background-color: rgba(30, 43, 250, 0.08);
+      border-radius: 100px;
+      width: 100%;
+    }
+
+    [class~="01-hook-line"][class~="short"] {
+      width: 60%;
+    }
+
+    [id="01-hook-inflation-shadow"] {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 50%;
+      background-color: rgba(220, 38, 38, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    [id="01-hook-inflation-text"] {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 6cqw;
+      color: #fdfae7;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      text-align: center;
+      line-height: 1.2;
+    }
+  </style>
+
+  <div id="root" data-composition-id="01-hook" data-width="1080" data-height="1920" data-duration="5.6">
+    <div class="clip" id="01-hook-bg" data-start="0" data-duration="5.6" data-track-index="0"></div>
+    <div id="01-hook-content-area">
+      <div id="01-hook-slip">
+        <div id="01-hook-slip-title">Salary Slip</div>
+        <div id="01-hook-slip-amount">$83,000</div>
+        <div id="01-hook-slip-raise">+10% RAISE</div>
+        
+        <div id="01-hook-slip-lines">
+          <div class="01-hook-line"></div>
+          <div class="01-hook-line"></div>
+          <div class="01-hook-line short"></div>
+        </div>
+
+        <div id="01-hook-inflation-shadow">
+          <div id="01-hook-inflation-text">Purchasing<br>Power</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["01-hook"] = tl;
+
+      tl.fromTo('[id="01-hook-slip"]',
+        { scale: 0.4, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 1.0, ease: "back.out(1.5)" },
+        0.0
+      );
+
+      tl.fromTo('[id="01-hook-inflation-shadow"]',
+        { yPercent: 100 },
+        { yPercent: 0, duration: 0.8, ease: "power2.out" },
+        2.5
+      );
+    })();
+  </script>
+</template>

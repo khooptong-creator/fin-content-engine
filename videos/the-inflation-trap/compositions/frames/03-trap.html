@@ -1,0 +1,288 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('assets/fonts/SpaceGrotesk-Medium.woff2') format('woff2');
+      font-weight: 500;
+    }
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('assets/fonts/SpaceGrotesk-SemiBold.woff2') format('woff2');
+      font-weight: 600;
+    }
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('assets/fonts/SpaceGrotesk-Bold.woff2') format('woff2');
+      font-weight: 700;
+    }
+    @font-face {
+      font-family: 'Inter';
+      src: url('assets/fonts/Inter-Regular.woff2') format('woff2');
+      font-weight: 400;
+    }
+
+    #root {
+      width: 100%;
+      height: 100%;
+      background-color: transparent;
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+      container-type: size;
+    }
+
+    .clip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .bg {
+      background-color: #fdfae7;
+    }
+
+    .content {
+      position: absolute;
+      top: 10cqh;
+      left: 10cqw;
+      right: 10cqw;
+      height: 70cqh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      margin-bottom: 6cqh;
+    }
+
+    .eyebrow {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600;
+      font-size: 3cqw;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #1e2bfa;
+      margin-bottom: 2cqh;
+    }
+
+    .headline {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 9cqw;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      color: #111111;
+    }
+
+    .chart-container {
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      position: relative;
+      padding-bottom: 5cqh;
+    }
+
+    .chart-base {
+      position: absolute;
+      bottom: 5cqh;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background-color: rgba(30,43,250,0.1);
+    }
+
+    .bar-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 16cqw;
+      position: relative;
+      z-index: 2;
+    }
+
+    .bar-value {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 6cqw;
+      color: #1e2bfa;
+      margin-bottom: 1.5cqh;
+    }
+
+    .bar {
+      width: 100%;
+      background: #1e2bfa;
+      border-radius: 6px 6px 0 0;
+      transform: scaleY(0);
+      transform-origin: bottom center;
+    }
+
+    #group-official .bar {
+      background: rgba(30,43,250,0.15);
+    }
+    #group-official .bar-value {
+      color: #6b6b6b;
+    }
+
+    .bar-label {
+      font-family: 'Inter', sans-serif;
+      font-weight: 400;
+      font-size: 3.5cqw;
+      color: #6b6b6b;
+      position: absolute;
+      bottom: -4cqh;
+      text-align: center;
+      width: 20cqw;
+      line-height: 1.2;
+    }
+
+    .progress-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background-color: #1e2bfa;
+      width: 37.5%;
+    }
+  </style>
+
+  <div id="root" data-composition-id="03-trap" data-width="1080" data-height="1920" data-duration="8">
+    <div class="clip bg" data-start="0" data-duration="8" data-track-index="0"></div>
+    
+    <div class="clip" data-start="0" data-duration="8" data-track-index="1">
+      <div class="content">
+        <div class="header" id="header">
+          <div class="eyebrow">The Trap</div>
+          <div class="headline">Real inflation is<br>much higher</div>
+        </div>
+
+        <div class="chart-container">
+          <div class="chart-base"></div>
+          
+          <div class="bar-group" id="group-official">
+            <div class="bar-value">5%</div>
+            <div class="bar" style="height: 12cqh;"></div>
+            <div class="bar-label">Official</div>
+          </div>
+          
+          <div class="bar-group" id="group-education">
+            <div class="bar-value">10%</div>
+            <div class="bar" style="height: 24cqh;"></div>
+            <div class="bar-label">Education</div>
+          </div>
+          
+          <div class="bar-group" id="group-healthcare">
+            <div class="bar-value">12%</div>
+            <div class="bar" style="height: 28.8cqh;"></div>
+            <div class="bar-label">Healthcare</div>
+          </div>
+          
+          <div class="bar-group" id="group-real-estate">
+            <div class="bar-value">15%</div>
+            <div class="bar" style="height: 36cqh;"></div>
+            <div class="bar-label">Real Estate</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="progress-bar"></div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["03-trap"] = tl;
+
+      gsap.set(".bar-group", { opacity: 0 });
+
+      tl.fromTo("#header", 
+        { y: 30, opacity: 0 }, 
+        { y: 0, opacity: 1, duration: 1, ease: "power3.out" }, 
+        0
+      );
+      
+      tl.fromTo(".chart-base",
+        { scaleX: 0 },
+        { scaleX: 1, duration: 1, ease: "power3.out", transformOrigin: "left center" },
+        0.5
+      );
+
+      // Scene 1: 0.0s 
+      tl.set("#group-official", { opacity: 1 }, 0);
+      tl.fromTo("#group-official .bar",
+        { scaleY: 0 },
+        { scaleY: 1, duration: 1.0, ease: "power3.out" },
+        0.2
+      );
+      tl.fromTo("#group-official .bar-value",
+        { y: 15, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        0.5
+      );
+      tl.fromTo("#group-official .bar-label",
+        { y: 10, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        0.4
+      );
+
+      // Scene 2: 2.5s
+      tl.set("#group-education", { opacity: 1 }, 2.5);
+      tl.fromTo("#group-education .bar",
+        { scaleY: 0 },
+        { scaleY: 1, duration: 1.0, ease: "power3.out" },
+        2.5
+      );
+      tl.fromTo("#group-education .bar-value",
+        { y: 15, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        2.8
+      );
+      tl.fromTo("#group-education .bar-label",
+        { y: 10, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        2.7
+      );
+
+      // Scene 3: 4.0s
+      tl.set("#group-healthcare", { opacity: 1 }, 4.0);
+      tl.fromTo("#group-healthcare .bar",
+        { scaleY: 0 },
+        { scaleY: 1, duration: 1.0, ease: "power3.out" },
+        4.0
+      );
+      tl.fromTo("#group-healthcare .bar-value",
+        { y: 15, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        4.3
+      );
+      tl.fromTo("#group-healthcare .bar-label",
+        { y: 10, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        4.2
+      );
+
+      // Scene 4: 5.5s
+      tl.set("#group-real-estate", { opacity: 1 }, 5.5);
+      tl.fromTo("#group-real-estate .bar",
+        { scaleY: 0 },
+        { scaleY: 1, duration: 1.0, ease: "power3.out" },
+        5.5
+      );
+      tl.fromTo("#group-real-estate .bar-value",
+        { y: 15, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        5.8
+      );
+      tl.fromTo("#group-real-estate .bar-label",
+        { y: 10, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+        5.7
+      );
+
+    })();
+  </script>
+</template>

@@ -1,0 +1,179 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Inter";
+      src: url("assets/fonts/Inter.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "Space Grotesk";
+      src: url("assets/fonts/SpaceGrotesk.woff2") format("woff2");
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      container-type: size;
+      overflow: hidden;
+      font-family: "Inter", sans-serif;
+      color: #111111;
+    }
+
+    .clip {
+      position: absolute;
+      inset: 0;
+      background-color: #fdfae7;
+    }
+
+    .content-area {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 17cqh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      background-color: rgba(30, 43, 250, 0.04);
+      border: 1.5px solid rgba(30, 43, 250, 0.2);
+      border-radius: 14px;
+      padding: 5cqw;
+      display: flex;
+      flex-direction: column;
+      gap: 4cqw;
+      width: 55cqw;
+    }
+
+    .bar-row {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5cqw;
+    }
+
+    .bar-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .bar-label {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 1.8cqw;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #1e2bfa; /* Cobalt */
+    }
+
+    .bar-value {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 4.2cqw;
+      font-weight: 700;
+      line-height: 1.0;
+    }
+
+    .val-green { color: #059669; }
+    .val-red { color: #dc2626; }
+
+    .track {
+      width: 100%;
+      height: 28px;
+      background-color: rgba(30, 43, 250, 0.08);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .fill {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      left: 0;
+      top: 0;
+      border-radius: 6px;
+      transform-origin: left center;
+    }
+
+    .fill-green {
+      background-color: #059669;
+    }
+    
+    .fill-red {
+      background-color: #dc2626;
+    }
+  </style>
+
+  <div id="root" data-composition-id="04-math" data-width="1080" data-height="1920" data-duration="6.5">
+    <div class="clip" data-start="0" data-duration="6.5" data-track-index="0">
+      <div class="content-area">
+        <div class="card" id="04-math-card">
+          
+          <!-- Salary Bar -->
+          <div class="bar-row" id="04-math-salary">
+            <div class="bar-header">
+              <div class="bar-label">Salary Growth</div>
+              <div class="bar-value val-green">8%</div>
+            </div>
+            <div class="track">
+              <div class="fill fill-green" id="04-math-salary-fill" style="transform: scaleX(0);"></div>
+            </div>
+          </div>
+          
+          <!-- Cost Bar -->
+          <div class="bar-row" id="04-math-cost">
+            <div class="bar-header">
+              <div class="bar-label">Real Inflation</div>
+              <div class="bar-value val-red">15%</div>
+            </div>
+            <div class="track">
+              <div class="fill fill-red" id="04-math-cost-fill" style="transform: scaleX(0);"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    window.__timelines["04-math"] = tl;
+
+    // Initial states
+    gsap.set('[id="04-math-card"]', { opacity: 0 });
+    gsap.set('[id="04-math-salary"]', { opacity: 0 });
+    gsap.set('[id="04-math-cost"]', { opacity: 0 });
+
+    // Fade in card slightly before everything starts
+    tl.to('[id="04-math-card"]', { opacity: 1, duration: 0.5 }, 0.0);
+
+    // Scene 1: 0.0s - "Salary Bar" (green) grows from the left (Motion: slide-right)
+    tl.fromTo('[id="04-math-salary"]', 
+      { opacity: 0, x: -60 }, 
+      { opacity: 1, x: 0, duration: 1.0, ease: "power3.out" }, 
+      0.0
+    );
+    tl.fromTo('[id="04-math-salary-fill"]', 
+      { scaleX: 0 }, 
+      { scaleX: 0.35, duration: 1.2, ease: "power2.out" }, 
+      0.2
+    );
+
+    // Scene 2: 2.5s - "Cost Bar" (red) races past it from the right (Motion: slide-left)
+    tl.fromTo('[id="04-math-cost"]', 
+      { opacity: 0, x: 60 }, 
+      { opacity: 1, x: 0, duration: 0.8, ease: "power3.out" }, 
+      2.5
+    );
+    tl.fromTo('[id="04-math-cost-fill"]', 
+      { scaleX: 0 }, 
+      { scaleX: 0.85, duration: 1.0, ease: "power3.inOut" }, 
+      2.7
+    );
+  </script>
+</template>

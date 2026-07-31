@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #F5F0E6; display: flex; align-items: center; justify-content: center; }
+      h1 { font-family: sans-serif; font-size: 80px; text-align: center; padding: 100px; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="30.0"
+      data-width="1080"
+      data-height="1920"
+    >
+      <h1 class="clip" data-start="0" data-duration="30.0" data-track-index="1">Generated Draft Video</h1>
+      <audio
+        id="el-bgm"
+        src="audio.mp3"
+        data-start="0"
+        data-duration="30.0"
+        data-track-index="11"
+        data-volume="1"
+      ></audio>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

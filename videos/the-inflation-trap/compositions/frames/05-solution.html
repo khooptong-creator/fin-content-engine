@@ -1,0 +1,213 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('assets/fonts/SpaceGrotesk-Bold.woff2') format('woff2'), url('capture/assets/fonts/SpaceGrotesk-Bold.woff2') format('woff2');
+      font-weight: 600;
+      font-style: normal;
+    }
+
+    #root {
+      width: 100cqw;
+      height: 100cqh;
+      position: relative;
+      overflow: hidden;
+      container-type: size;
+    }
+
+    .clip-bg-05 {
+      position: absolute;
+      inset: 0;
+      background-color: #fdfae7;
+    }
+
+    .rings-05 {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200cqw;
+      height: 200cqw;
+      background: radial-gradient(circle, transparent 40%, rgba(30,43,250,0.03) 41%, rgba(30,43,250,0.03) 45%, transparent 46%, transparent 55%, rgba(30,43,250,0.02) 56%, rgba(30,43,250,0.02) 60%, transparent 61%);
+    }
+
+    .container-05 {
+      position: absolute;
+      top: 40cqh;
+      left: 50cqw;
+      width: 40cqw;
+      height: 40cqw;
+      margin-left: -20cqw;
+      margin-top: -20cqw;
+    }
+
+    #bank-icon-05 {
+      position: absolute;
+      inset: 0;
+      fill: rgba(30,43,250,0.04);
+      stroke: #1e2bfa;
+      stroke-width: 2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+
+    .coin-05 {
+      position: absolute;
+      width: 6cqw;
+      height: 6cqw;
+      background-color: #1e2bfa;
+      border-radius: 50%;
+      left: 50cqw;
+      top: 45cqh;
+      margin-left: -3cqw;
+      margin-top: -3cqw;
+      opacity: 0;
+      z-index: 1;
+    }
+
+    #asset-icon-05 {
+      position: absolute;
+      inset: 0;
+      fill: rgba(5,150,105,0.04);
+      stroke: #059669;
+      stroke-width: 4;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      opacity: 0;
+    }
+
+    #cta-05 {
+      position: absolute;
+      top: 65cqh;
+      left: 50cqw;
+      width: 50cqw;
+      height: 10cqw;
+      margin-left: -25cqw;
+      margin-top: -5cqw;
+      background-color: #1e2bfa;
+      color: #fdfae7;
+      border-radius: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 4cqw;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0;
+      z-index: 10;
+    }
+  </style>
+
+  <div id="root" data-composition-id="05-solution" data-width="1080" data-height="1920" data-duration="8">
+    <!-- Clip background -->
+    <div class="clip clip-bg-05" data-start="0" data-duration="8" data-track-index="0">
+      <div class="rings-05"></div>
+    </div>
+    
+    <div class="coin-05" id="coin1-05"></div>
+    <div class="coin-05" id="coin2-05"></div>
+    <div class="coin-05" id="coin3-05"></div>
+    <div class="coin-05" id="coin4-05"></div>
+
+    <div class="container-05">
+      <!-- Piggy Bank SVG -->
+      <svg id="bank-icon-05" viewBox="0 0 100 100">
+        <!-- body -->
+        <ellipse cx="50" cy="50" rx="35" ry="25" />
+        <!-- snout -->
+        <path d="M 15 50 Q 5 50 5 40 Q 15 35 20 40" />
+        <!-- ear -->
+        <path d="M 35 25 L 40 10 L 50 25" />
+        <!-- front leg -->
+        <path d="M 30 70 L 30 85 L 40 85 L 40 73" />
+        <!-- back leg -->
+        <path d="M 60 73 L 60 85 L 70 85 L 70 70" />
+        <!-- coin slot -->
+        <path d="M 40 25 L 60 25" />
+        <!-- eye -->
+        <circle cx="25" cy="40" r="2" fill="#1e2bfa" />
+      </svg>
+      
+      <!-- Asset Icon SVG -->
+      <svg id="asset-icon-05" viewBox="0 0 100 100">
+        <!-- arrow line -->
+        <polyline points="10,80 40,50 60,70 90,30" />
+        <!-- arrow head -->
+        <polyline points="70,30 90,30 90,50" />
+        <!-- filled area -->
+        <polygon points="10,80 40,50 60,70 90,30 90,90 10,90" stroke="none" fill="rgba(5,150,105,0.1)" />
+      </svg>
+    </div>
+
+    <!-- CTA Button -->
+    <div id="cta-05">Subscribe</div>
+  </div>
+
+  <script>
+    (function() {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["05-solution"] = tl;
+
+      // 0.0s: Scene 1 - Bank Icon starts shaking and drops coins
+      tl.set("#bank-icon-05", { opacity: 1, yPercent: 0, scale: 1, rotation: 0, transformOrigin: "50% 50%" }, 0);
+      
+      // Shake
+      for(let i = 0; i < 30; i++) {
+        tl.to("#bank-icon-05", 
+          { rotation: i % 2 === 0 ? 5 : -5, duration: 0.1, ease: "none" },
+          i * 0.1
+        );
+      }
+      tl.to("#bank-icon-05", { rotation: 0, duration: 0.1, ease: "power1.inOut" }, 3.0);
+      
+      // Coins dropping out
+      const coins = ["#coin1-05", "#coin2-05", "#coin3-05", "#coin4-05"];
+      coins.forEach((coin, idx) => {
+        const startT = 0.3 + idx * 0.6;
+        tl.fromTo(coin,
+          { yPercent: -100, opacity: 0 },
+          { yPercent: 0, opacity: 1, duration: 0.1, ease: "none" },
+          startT
+        );
+        tl.to(coin,
+          { yPercent: 800, opacity: 0, duration: 1.2, ease: "power1.in" },
+          startT + 0.1
+        );
+      });
+
+      // 3.0s: Scene 2 - Asset Icon slides in to replace bank icon
+      // Bank exit
+      tl.to("#bank-icon-05", 
+        { opacity: 0, yPercent: 20, scale: 0.8, duration: 0.5, ease: "power2.in" },
+        3.0
+      );
+
+      // Asset enters
+      tl.fromTo("#asset-icon-05",
+        { opacity: 0, yPercent: 40 },
+        { opacity: 1, yPercent: 0, duration: 0.8, ease: "back.out(1.5)" },
+        3.0
+      );
+      
+      // glowing bright green
+      tl.fromTo("#asset-icon-05",
+        { filter: "drop-shadow(0 0 0px rgba(5,150,105,0))" },
+        { filter: "drop-shadow(0 0 15px rgba(5,150,105,0.8))", duration: 1.5, ease: "power2.out" },
+        3.5
+      );
+
+      // 6.0s: Scene 3 - Subscribe Button pops
+      tl.fromTo("#cta-05",
+        { scale: 0, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.8, ease: "elastic.out(1, 0.6)" },
+        6.0
+      );
+
+      // pulse
+      tl.to("#cta-05", { scale: 1.05, duration: 0.2, ease: "power1.inOut" }, 7.0);
+      tl.to("#cta-05", { scale: 1, duration: 0.2, ease: "power1.inOut" }, 7.2);
+    })();
+  </script>
+</template>

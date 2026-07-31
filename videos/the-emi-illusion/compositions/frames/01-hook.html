@@ -1,0 +1,158 @@
+<template>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+
+    #root {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      container-type: size;
+      overflow: hidden;
+    }
+
+    .clip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    [id="01-hook-bg"] {
+      background-color: #F5F0E6;
+    }
+
+    [id="01-hook-content-area"] {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 83cqh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 22cqh;
+    }
+
+    [id="01-hook-phone"] {
+      position: relative;
+      width: 60cqw;
+      height: 100cqw;
+      background-color: #FFFFFF;
+      border: 3px solid #2D2D2D;
+      border-radius: 24px;
+      box-shadow: 6px 6px 0 #2D2D2D;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 12cqw;
+      z-index: 2;
+    }
+
+    [id="01-hook-phone-screen"] {
+      width: 52cqw;
+      height: 70cqw;
+      background-color: #A8D8F0;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 4cqw;
+    }
+
+    [id="01-hook-phone-icon"] {
+      width: 30cqw;
+      height: 30cqw;
+      fill: #FFFFFF;
+    }
+
+    [id="01-hook-badge"] {
+      position: absolute;
+      top: 6cqw;
+      right: 2cqw;
+      background-color: #FDE68A;
+      border: 3px solid #2D2D2D;
+      border-radius: 50px;
+      padding: 2cqw 4cqw;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 3.5cqw;
+      color: #2D2D2D;
+      box-shadow: 4px 4px 0 #2D2D2D;
+      transform: rotate(12deg);
+      z-index: 3;
+    }
+
+    [id="01-hook-monster"] {
+      position: absolute;
+      bottom: -10cqw;
+      right: -8cqw;
+      width: 45cqw;
+      height: 45cqw;
+      z-index: 1;
+    }
+
+    [id="01-hook-monster-body"] {
+      fill: #F8635F;
+      stroke: #2D2D2D;
+      stroke-width: 3;
+    }
+
+    [id="01-hook-monster-eye"] {
+      fill: #2D2D2D;
+    }
+  </style>
+
+  <div id="root" data-composition-id="01-hook" data-width="1080" data-height="1920" data-duration="6.6">
+    <div class="clip" id="01-hook-bg" data-start="0" data-duration="6.6" data-track-index="0"></div>
+    <div id="01-hook-content-area">
+      <div id="01-hook-phone">
+        <div id="01-hook-phone-screen">
+          <svg id="01-hook-phone-icon" viewBox="0 0 24 24">
+            <rect x="4" y="1" width="16" height="22" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+            <circle cx="12" cy="18" r="1.5" fill="currentColor"/>
+          </svg>
+        </div>
+      </div>
+      <div id="01-hook-badge">0% EMI</div>
+      <svg id="01-hook-monster" viewBox="0 0 100 100">
+        <path id="01-hook-monster-body" d="M10,80 Q5,50 30,40 Q35,10 50,15 Q65,10 70,40 Q95,50 90,80 Q70,95 50,90 Q30,95 10,80 Z"/>
+        <circle id="01-hook-monster-eye" cx="35" cy="45" r="4"/>
+        <circle id="01-hook-monster-eye" cx="65" cy="45" r="4"/>
+        <path d="M40,60 Q50,65 60,60" fill="none" stroke="#2D2D2D" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["01-hook"] = tl;
+
+      tl.fromTo('[id="01-hook-phone"]',
+        { scale: 0.4, opacity: 0, y: 60 },
+        { scale: 1, opacity: 1, y: 0, duration: 1.0, ease: "back.out(1.5)" },
+        0.0
+      );
+
+      tl.fromTo('[id="01-hook-badge"]',
+        { scale: 0, opacity: 0, rotation: -30 },
+        { scale: 1, opacity: 1, rotation: 12, duration: 0.8, ease: "back.out(2)" },
+        1.2
+      );
+
+      tl.fromTo('[id="01-hook-monster"]',
+        { yPercent: 100, opacity: 0 },
+        { yPercent: 0, opacity: 1, duration: 0.9, ease: "power2.out" },
+        3.0
+      );
+
+      tl.to('[id="01-hook-monster"]', 
+        { rotation: 5, duration: 0.3, ease: "power1.inOut", yoyo: true, repeat: 3 },
+        3.8
+      );
+    })();
+  </script>
+</template>

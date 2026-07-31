@@ -1,0 +1,157 @@
+<template>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      container-type: size;
+      overflow: hidden;
+      font-family: "Inter", sans-serif;
+      color: #2D2D2D;
+    }
+
+    .clip {
+      position: absolute;
+      inset: 0;
+      background-color: #F5F0E6;
+    }
+
+    .content-area {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 17cqh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6cqw;
+    }
+
+    .tag {
+      background-color: #FFFFFF;
+      border: 3px solid #2D2D2D;
+      border-radius: 20px;
+      box-shadow: 6px 6px 0 #2D2D2D;
+      padding: 5cqw;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2cqw;
+      width: 38cqw;
+    }
+
+    .tag-label {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 3cqw;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .tag-price {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 8cqw;
+      font-weight: 700;
+      line-height: 1.0;
+    }
+
+    .tag-note {
+      font-family: "Inter", sans-serif;
+      font-size: 2.2cqw;
+      color: #6B6B6B;
+      text-align: center;
+    }
+
+    #tag-emi {
+      border-color: #F8635F;
+      box-shadow: 6px 6px 0 #F8635F;
+    }
+
+    #tag-emi .tag-label {
+      color: #F8635F;
+    }
+
+    #tag-emi .tag-price {
+      color: #F8635F;
+    }
+
+    #tag-upfront {
+      border-color: #7ECDC0;
+      box-shadow: 6px 6px 0 #7ECDC0;
+    }
+
+    #tag-upfront .tag-label {
+      color: #7ECDC0;
+    }
+
+    #tag-upfront .tag-price {
+      color: #7ECDC0;
+    }
+
+    .save-badge {
+      position: absolute;
+      top: 12cqh;
+      background-color: #FDE68A;
+      border: 3px solid #2D2D2D;
+      border-radius: 50px;
+      padding: 2cqw 4cqw;
+      font-family: "Space Grotesk", sans-serif;
+      font-weight: 700;
+      font-size: 3cqw;
+      box-shadow: 4px 4px 0 #2D2D2D;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="04-math" data-width="1080" data-height="1920" data-duration="6.4">
+    <div class="clip" data-start="0" data-duration="6.4" data-track-index="0">
+      <div class="content-area">
+        <div class="save-badge" id="save-badge">SAVE ₹6,000</div>
+
+        <div class="tag" id="tag-emi">
+          <div class="tag-label">EMI Total</div>
+          <div class="tag-price">₹60,000</div>
+          <div class="tag-note">No-cost EMI</div>
+        </div>
+
+        <div class="tag" id="tag-upfront">
+          <div class="tag-label">Upfront</div>
+          <div class="tag-price">₹54,000</div>
+          <div class="tag-note">Same discount</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    window.__timelines["04-math"] = tl;
+
+    gsap.set('[id="tag-emi"]', { opacity: 0, x: -80 });
+    gsap.set('[id="tag-upfront"]', { opacity: 0, x: 80 });
+    gsap.set('[id="save-badge"]', { opacity: 0, scale: 0, y: -30 });
+
+    tl.fromTo('[id="tag-emi"]',
+      { opacity: 0, x: -80 },
+      { opacity: 1, x: 0, duration: 1.0, ease: "power3.out" },
+      0.0
+    );
+
+    tl.fromTo('[id="tag-upfront"]',
+      { opacity: 0, x: 80 },
+      { opacity: 1, x: 0, duration: 1.0, ease: "power3.out" },
+      2.0
+    );
+
+    tl.fromTo('[id="save-badge"]',
+      { opacity: 0, scale: 0, y: -30 },
+      { opacity: 1, scale: 1, y: 0, duration: 0.8, ease: "back.out(1.5)" },
+      4.0
+    );
+  </script>
+</template>

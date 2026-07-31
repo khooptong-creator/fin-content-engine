@@ -47,8 +47,8 @@ from app.storyboard import (
     render_index_html,
 )
 from app.youtube import (
+    _build_frames,
     _generate_frame_audio,
-    _generate_frame_compositions,
     _placeholder_frame,
     _write_silence,
 )
@@ -211,16 +211,16 @@ async def main() -> None:
                 _placeholder_frame(frame), encoding="utf-8"
             )
     else:
-        print("-> frames: Gemini...")
-        placeholders = await _generate_frame_compositions(board, video_dir)
+        print("-> frames: planning archetypes...")
+        placeholders = await _build_frames(board, video_dir)
         if placeholders:
             # These render and pass check, so without this the run looks clean
             # while most of the video is fallback title cards.
             print(
                 f"\n!! {len(placeholders)}/{len(board.frames)} frames fell back to "
-                f"placeholder cards: {', '.join(placeholders)}"
+                f"heuristic fallback: {', '.join(placeholders)}"
             )
-            print("!! usually a Gemini rate limit - check the logged error above")
+            print("!! the frame planner was unavailable - check the logged error above")
             if not args.allow_placeholders:
                 sys.exit("!! refusing to continue; pass --allow-placeholders to override")
 

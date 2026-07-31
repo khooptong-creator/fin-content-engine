@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import contextlib
 
+import os
+from pathlib import Path
 import structlog
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app import routes
 from app.audit import audit_log
@@ -22,6 +25,8 @@ from app.scheduler import build_job_specs, make_scheduler, register_jobs
 from app.settings import get_settings
 
 log = structlog.get_logger()
+
+VIDEOS_DIR = Path(os.environ.get("VIDEOS_DIR", "../videos")).resolve()
 
 
 @contextlib.asynccontextmanager
@@ -61,11 +66,25 @@ async def lifespan(app: FastAPI):
         await close_pool()
         log.info("worker_stopped")
 
+from fastapi.middleware.cors import CORSMiddleware
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Fin-Content Engine worker", version="0.1.0", lifespan=lifespan)
     app.state.scheduler = False  # set by lifespan; /health treats False as not-running
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Adjust in production
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
     app.include_router(routes.router)
+    
+    # Mount videos directory for static access by the frontend (audio/scripts)
+    app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="videos")
+    
     return app
 
 

@@ -105,10 +105,15 @@ Enforced structurally via **content archetypes** (§5): every draft stamped with
 
 ## 4. The Voice Pack (versioned in DB)
 
-One master system prompt injected into every drafting call, plus banned lists and few-shot examples. Seeded in **P2**, tunable forever (each save = a new version).
+One master system prompt (selected from 5 profiles) injected into every drafting call, plus banned lists and few-shot examples. Seeded in **P2**, tunable forever (each save = a new version).
 
-- **Role:** sharp, analytical commentator on US/Indian markets, personal finance, MF/ETF structures, investing styles, basic tax. Explains *what happened and why it's interesting* — never what the reader should do.
-- **Tone:** informative, well-researched, easy to digest, attention-grabbing openers. Dry humor and sarcasm as seasoning, not the dish. Never hype, never cocky-finfluencer cadence.
+- **Available Voice Profiles (5):**
+  1. **Teenage Boy**
+  2. **Teenage Girl**
+  3. **Adult Casual Male**
+  4. **Adult Casual Female**
+  5. **Baby's Voice**
+- **Core Role & Tone (All Profiles):** Scripts must be humorous, catchy, informative, and easy to digest. They should be bite-sized but medium length (up to 3 to 5 minutes). Explains *what happened and why it's interesting* — never what the reader should do.
 - **Format:** bite-size to mid-length, clean text. **Emojis: default zero on X; at most one on IG, only when it does real work.**
 - **Structure:** threads open with a hook and close with a genuine open-ended question. Add a second bookmark-optimized closer variant; A/B them via archetype metrics.
 - **Hard bans:** everything in §2.1, plus AI-tells — "delve", "in today's fast-paced world", "let's unpack", "game-changer", exclamation enthusiasm, em-dash pileups, listicle-voice unless the format demands it. Vary sentence rhythm.

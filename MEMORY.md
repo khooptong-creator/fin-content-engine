@@ -42,6 +42,11 @@ by three cheap, tireless LLMs.
 - Topology: bare process worker + embedder, host Postgres, behind the desk's Caddy.
 - See `docs/P1-HANDOFF.md` (full deploy saga + bug list), `PROGRESS.md` (canonical status).
 
+**YouTube Pipeline (Phase B) — IN PROGRESS (Local / Worker)**
+- AI Scripting (Phase 2): Integrated `google-genai` using Gemini 1.5 Flash. Scripts are generated in valid Markdown with YAML frontmatter, strict compliance rules applied via DB configs.
+- Voice/Audio TTS (Phase 3): Integrated ElevenLabs API. Worker parses Markdown to extract `Voiceover:` lines, maps personas (Teen boy, Adult Female, etc.) to ElevenLabs voice IDs, and synthesizes `audio.mp3`.
+- Next: YouTube API Auto-Upload (Phase 4).
+
 ---
 
 ## Architecture decisions that won't change
@@ -141,3 +146,4 @@ docker exec desk-caddy-1 caddy reload --config /etc/caddy/Caddyfile
 3. Read `docs/P1-VPS-DEPLOY-RUNBOOK.md` for the step-by-step (Phases 0–9).
 4. Read `docs/P1-DEPLOY-SOAK-CHECKLIST.md` for the 24h soak.
 5. The blueprint (`fin-content-engine-FINAL-blueprint.md`) is the source of truth for everything after P1.
+6. The YouTube expansion is detailed in `docs/youtube/YT-STRATEGY-OS-FINANCE.md`, `docs/youtube/YT-STRATEGY-OS-BABY.md`, and `docs/youtube/YT-HANDOFF.md`.

@@ -1,0 +1,168 @@
+<template>
+  <style>
+    @font-face {
+      font-family: 'Space Grotesk';
+      src: url('assets/fonts/SpaceGrotesk-Bold.woff2') format('woff2');
+      font-weight: 700;
+    }
+
+    #root {
+      width: 100%;
+      height: 100%;
+      background-color: transparent;
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+      container-type: size;
+    }
+
+    .clip {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .bg {
+      background-color: #fdfae7;
+    }
+
+    .content {
+      position: absolute;
+      top: 10cqh;
+      left: 10cqw;
+      right: 10cqw;
+      height: 70cqh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .headline {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 10cqw;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      position: absolute;
+      text-align: center;
+      width: 100%;
+    }
+
+    #text-1 {
+      color: #111111;
+    }
+
+    #text-2-stack {
+      position: absolute;
+      width: 100%;
+      display: grid;
+      visibility: hidden;
+    }
+
+    .glitch-base,
+    .glitch-copy {
+      grid-area: 1 / 1;
+      text-align: center;
+    }
+
+    .glitch-base {
+      z-index: 2;
+      color: #dc2626;
+    }
+
+    .glitch-copy {
+      z-index: 1;
+      opacity: 0;
+      will-change: transform;
+      mix-blend-mode: normal;
+    }
+
+    .glitch-copy.warm {
+      color: #dc2626;
+    }
+
+    .glitch-copy.cool {
+      color: #1e2bfa;
+    }
+
+    .progress-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background-color: #1e2bfa;
+      width: 25%;
+    }
+  </style>
+
+  <div id="root" data-composition-id="02-intro" data-width="1080" data-height="1920" data-duration="5.5">
+    <div class="clip bg" data-start="0" data-duration="5.5" data-track-index="0"></div>
+    
+    <div class="clip" data-start="0" data-duration="5.5" data-track-index="1">
+      <div class="content">
+        <div class="headline" id="text-1">THE INVISIBLE TAX</div>
+        <div class="headline" id="text-2-stack">
+          <div class="glitch-copy warm" aria-hidden="true">REAL INFLATION</div>
+          <div class="glitch-copy cool" aria-hidden="true">REAL INFLATION</div>
+          <div class="glitch-base">REAL INFLATION</div>
+        </div>
+      </div>
+      
+      <div class="progress-bar"></div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["02-intro"] = tl;
+
+      // 0.0s: Fade in Text 1
+      tl.fromTo("#text-1",
+        { opacity: 0, scale: 0.95 },
+        { opacity: 1, scale: 1, duration: 1, ease: "power3.out" },
+        0
+      );
+
+      // 2.5s: Text changes to Text 2 with glitch reveal
+      tl.set("#text-1", { opacity: 0 }, 2.5);
+      tl.set("#text-2-stack", { autoAlpha: 1 }, 2.5);
+
+      // Glitch effect math
+      const glitchHash = (n) => {
+        const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+        return x - Math.floor(x);
+      };
+
+      const copies = gsap.utils.toArray("#text-2-stack .glitch-copy");
+      const amp = { a: 0 };
+      const GLITCH_START = 2.5;
+      const GLITCH_DUR = 0.4;
+      const JITTER_STEP = 1/24; 
+      const MAX_SPLIT = 10;
+      
+      tl.set(amp, { a: 1 }, GLITCH_START);
+      tl.set(copies, { opacity: 0.6 }, GLITCH_START);
+      
+      tl.to(amp, {
+        a: 0,
+        duration: GLITCH_DUR,
+        ease: "power3.in",
+        onUpdate: () => {
+          const step = Math.floor(tl.time() / JITTER_STEP);
+          copies.forEach((el, layer) => {
+            const jx = (glitchHash(step * 13 + layer * 7) * 2 - 1) * MAX_SPLIT * amp.a;
+            const jy = (glitchHash(step * 29 + layer * 11) * 2 - 1) * MAX_SPLIT * 0.35 * amp.a;
+            gsap.set(el, { x: jx, y: jy });
+          });
+        }
+      }, GLITCH_START);
+
+      tl.set(copies, { x: 0, y: 0, opacity: 0 }, GLITCH_START + GLITCH_DUR);
+    })();
+  </script>
+</template>

@@ -108,7 +108,7 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     duration = board.total_duration
     log.info("storyboard_compiled", frames=len(board.frames), duration=duration)
 
-    placeholders = await _generate_frame_compositions(board, video_dir)
+    placeholders = await _build_frames(board, video_dir)
     if placeholders:
         # A placeholder renders fine and passes validation, so nothing downstream
         # would notice that most of the video is fallback title cards. Refuse to
@@ -446,6 +446,18 @@ LAYOUT — overlapping text is rejected:
 Text must be legible at a glance: display type at least 7cqw, body at least 4.5cqw, weight 600+. No <br> in body text."""
 
 
+# "local" builds frames from archetypes planned by Ollama (free, no rate limit);
+# "gemini" has the cloud model author raw HTML per frame.
+FRAME_BACKEND = os.environ.get("FRAME_BACKEND", "local").lower()
+
+
+async def _build_frames(board: Storyboard, video_dir: Path) -> list[str]:
+    """Dispatch frame generation to the configured backend."""
+    if FRAME_BACKEND == "gemini":
+        return await _generate_frame_compositions(board, video_dir)
+    return await _generate_frame_compositions_local(board, video_dir)
+
+
 def _is_retryable(exc: BaseException) -> bool:
     """Rate limits and transient server errors are worth another attempt."""
     text = str(exc)
@@ -453,6 +465,53 @@ def _is_retryable(exc: BaseException) -> bool:
         marker in text
         for marker in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500")
     )
+
+
+async def _generate_frame_compositions_local(board: Storyboard, video_dir: Path) -> list[str]:
+    """Build every frame from pre-validated archetypes, planned by the local LLM.
+
+    Returns the slugs that fell back to the heuristic planner. Unlike the
+    HTML-authoring path this cannot produce an invalid composition: the model
+    only chooses a shape and fills slots, and the templates were validated once.
+    """
+    import httpx
+
+    from app.archetypes import render_archetype
+    from app.localllm import OLLAMA_TIMEOUT, heuristic_plan, plan_frame
+
+    frames_dir = video_dir / "compositions" / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    degraded: list[str] = []
+
+    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
+
+        async def build(frame: Frame) -> None:
+            fallback = heuristic_plan(frame.voiceover, frame.scene, frame.title)
+            plan = await plan_frame(
+                voiceover=frame.voiceover,
+                scene=frame.scene,
+                title=frame.title,
+                direction=board.direction,
+                client=client,
+            )
+            if plan == fallback:
+                degraded.append(frame.slug)
+            (frames_dir / f"{frame.slug}.html").write_text(
+                render_archetype(frame.slug, frame.duration, plan), encoding="utf-8"
+            )
+
+        # Sequential: one local GPU serves one request at a time, so fanning out
+        # only adds queueing latency.
+        for frame in board.frames:
+            await build(frame)
+
+    log.info(
+        "frame_compositions_generated",
+        backend="local",
+        frames=len(board.frames),
+        heuristic=len(degraded),
+    )
+    return degraded
 
 
 async def _generate_frame_compositions(board: Storyboard, video_dir: Path) -> list[str]:

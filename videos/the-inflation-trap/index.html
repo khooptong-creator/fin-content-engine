@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js" integrity="sha384-sG0Hv1tP1lZCk9KQmrIbY/XNwi+OY84GQqhMscbnsoBFqAz8KNCil1kvfL3Hbbk2" crossorigin="anonymous"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #000;
+      }
+      #root {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #F5F0E6;
+      }
+      .scene {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="32.917"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div
+        id="el-01-hook"
+        class="scene"
+        data-composition-id="01-hook"
+        data-composition-src="compositions/frames/01-hook.html"
+        data-start="0"
+        data-duration="4.715"
+        data-track-index="1"
+      ></div>
+      <audio
+        id="el-01-hook-voice"
+        src="assets/voice/01.wav"
+        data-start="0"
+        data-duration="4.715"
+        data-track-index="10"
+        data-volume="1"
+      ></audio>
+
+      <div
+        id="el-02-intro"
+        class="scene"
+        data-composition-id="02-intro"
+        data-composition-src="compositions/frames/02-intro.html"
+        data-start="4.715"
+        data-duration="4.373"
+        data-track-index="1"
+      ></div>
+      <audio
+        id="el-02-intro-voice"
+        src="assets/voice/02.wav"
+        data-start="4.715"
+        data-duration="4.373"
+        data-track-index="10"
+        data-volume="1"
+      ></audio>
+
+      <div
+        id="el-03-trap"
+        class="scene"
+        data-composition-id="03-trap"
+        data-composition-src="compositions/frames/03-trap.html"
+        data-start="9.088000000000001"
+        data-duration="8.853"
+        data-track-index="1"
+      ></div>
+      <audio
+        id="el-03-trap-voice"
+        src="assets/voice/03.wav"
+        data-start="9.088000000000001"
+        data-duration="8.853"
+        data-track-index="10"
+        data-volume="1"
+      ></audio>
+
+      <div
+        id="el-04-math"
+        class="scene"
+        data-composition-id="04-math"
+        data-composition-src="compositions/frames/04-math.html"
+        data-start="17.941000000000003"
+        data-duration="4.864"
+        data-track-index="1"
+      ></div>
+      <audio
+        id="el-04-math-voice"
+        src="assets/voice/04.wav"
+        data-start="17.941000000000003"
+        data-duration="4.864"
+        data-track-index="10"
+        data-volume="1"
+      ></audio>
+
+      <div
+        id="el-05-solution"
+        class="scene"
+        data-composition-id="05-solution"
+        data-composition-src="compositions/frames/05-solution.html"
+        data-start="22.805000000000003"
+        data-duration="10.112"
+        data-track-index="1"
+      ></div>
+      <audio
+        id="el-05-solution-voice"
+        src="assets/voice/05.wav"
+        data-start="22.805000000000003"
+        data-duration="10.112"
+        data-track-index="10"
+        data-volume="1"
+      ></audio>
+
+      <!-- BGM -->
+      <audio
+        id="el-bgm"
+        src="bgm.mp3"
+        data-start="0"
+        data-duration="32.917"
+        data-track-index="11"
+        data-volume="0.35"
+      ></audio>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

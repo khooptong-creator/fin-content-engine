@@ -1,0 +1,33 @@
+{
+  "provider": "auto",
+  "speed": 1,
+  "lines": [
+    {
+      "id": "01",
+      "text": "Did you get a 10 percent raise this year? Bad news: you might actually be poorer."
+    },
+    {
+      "id": "02",
+      "text": "Let me explain the invisible tax stealing your wealth: real inflation."
+    },
+    {
+      "id": "03",
+      "text": "Official inflation might be 5 percent. But education? 10 percent. Healthcare? 12 percent. Real estate? 15 percent."
+    },
+    {
+      "id": "04",
+      "text": "If your salary grows at 8 percent, your purchasing power is actually shrinking."
+    },
+    {
+      "id": "05",
+      "text": "This is why saving in a bank account isn't enough. You have to invest in assets that outpace your real inflation rate. Subscribe to learn how money actually works."
+    }
+  ],
+  "bgm": {
+    "mode": "retrieve",
+    "query": "soft upbeat playful",
+    "blob": "Why your 10% raise is actually a pay cut due to inflation.",
+    "arc": "Hook → Intro → The Trap → The Math → Solution & CTA"
+  },
+  "voice": "af_bella"
+}

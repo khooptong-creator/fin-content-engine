@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+:root {
+  /* Light Mode Variables (kept crisp) */
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #f4f4f5;
+  --card-foreground: #09090b;
+  --primary: #2563eb; 
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --accent: #7c3aed; 
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #2563eb;
+  --radius: 0.75rem;
+
+  --bg-gradient: radial-gradient(at 0% 0%, hsla(210, 100%, 95%, 1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(250, 100%, 95%, 0.8) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(300, 100%, 95%, 0.8) 0, transparent 50%);
+  --glass-bg: rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(0, 0, 0, 0.05);
+  --glass-panel-bg: rgba(255, 255, 255, 0.7);
+}
+
+.dark {
+  /* AMOLED Dark Mode Variables */
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #0a0a0a;
+  --card-foreground: #ffffff;
+  --primary: #3b82f6; 
+  --primary-foreground: #ffffff;
+  --secondary: #171717;
+  --secondary-foreground: #a3a3a3;
+  --accent: #8b5cf6; 
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #1f1f22;
+  --input: #1f1f22;
+  --ring: #3b82f6;
+
+  /* Sharp subtle gradient at the very top for depth without ruining amoled */
+  --bg-gradient: radial-gradient(at 50% -20%, hsla(253, 50%, 20%, 0.15) 0, transparent 40%);
+  --glass-bg: rgba(10, 10, 10, 0.3);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-panel-bg: rgba(5, 5, 5, 0.65);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-panel {
+  background: var(--glass-panel-bg);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Premium Animations */
+.premium-hover {
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.premium-hover:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--card);
+}
+
+/* Glowing utilities */
+.glow-text {
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+.glow-primary {
+  box-shadow: 0 0 30px -5px var(--primary);
+}

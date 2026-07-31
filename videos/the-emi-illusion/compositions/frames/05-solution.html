@@ -1,0 +1,240 @@
+<template>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+
+    #root {
+      width: 100cqw;
+      height: 100cqh;
+      position: relative;
+      overflow: hidden;
+      container-type: size;
+      background-color: #F5F0E6;
+    }
+
+    .clip-bg-05 {
+      position: absolute;
+      inset: 0;
+      background-color: #F5F0E6;
+    }
+
+    .container-05 {
+      position: absolute;
+      top: 38cqh;
+      left: 50cqw;
+      width: 40cqw;
+      height: 40cqw;
+      margin-left: -20cqw;
+      margin-top: -20cqw;
+    }
+
+    #bank-icon-05 {
+      position: absolute;
+      inset: 0;
+      fill: #FFFFFF;
+      stroke: #2D2D2D;
+      stroke-width: 3;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      filter: drop-shadow(6px 6px 0 #2D2D2D);
+    }
+
+    .coin-05 {
+      position: absolute;
+      width: 6cqw;
+      height: 6cqw;
+      background-color: #FDE68A;
+      border: 2px solid #2D2D2D;
+      border-radius: 50%;
+      left: 50cqw;
+      top: 45cqh;
+      margin-left: -3cqw;
+      margin-top: -3cqw;
+      opacity: 0;
+      z-index: 1;
+    }
+
+    #asset-icon-05 {
+      position: absolute;
+      inset: 0;
+      fill: rgba(126, 205, 192, 0.15);
+      stroke: #7ECDC0;
+      stroke-width: 4;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      opacity: 0;
+      filter: drop-shadow(6px 6px 0 #2D2D2D);
+    }
+
+    #cta-pay {
+      position: absolute;
+      top: 62cqh;
+      left: 50cqw;
+      width: 56cqw;
+      height: 10cqw;
+      margin-left: -28cqw;
+      margin-top: -5cqw;
+      background-color: #7ECDC0;
+      color: #FFFFFF;
+      border: 3px solid #2D2D2D;
+      border-radius: 100px;
+      box-shadow: 4px 4px 0 #2D2D2D;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 4cqw;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      z-index: 10;
+    }
+
+    #cta-share {
+      position: absolute;
+      top: 72cqh;
+      left: 50cqw;
+      width: 56cqw;
+      height: 8cqw;
+      margin-left: -28cqw;
+      margin-top: -4cqw;
+      background-color: #FDE68A;
+      color: #2D2D2D;
+      border: 3px solid #2D2D2D;
+      border-radius: 100px;
+      box-shadow: 4px 4px 0 #2D2D2D;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 3cqw;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      z-index: 10;
+    }
+
+    #no-text {
+      position: absolute;
+      top: 20cqh;
+      left: 50cqw;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 6cqw;
+      font-weight: 700;
+      color: #F8635F;
+      opacity: 0;
+      text-align: center;
+      width: 80cqw;
+      margin-left: -40cqw;
+    }
+  </style>
+
+  <div id="root" data-composition-id="05-solution" data-width="1080" data-height="1920" data-duration="8.8">
+    <div class="clip clip-bg-05" data-start="0" data-duration="8.8" data-track-index="0"></div>
+    
+    <div id="no-text">SAVINGS ACCOUNT?</div>
+    <div class="coin-05" id="coin1-05"></div>
+    <div class="coin-05" id="coin2-05"></div>
+    <div class="coin-05" id="coin3-05"></div>
+    <div class="coin-05" id="coin4-05"></div>
+
+    <div class="container-05">
+      <svg id="bank-icon-05" viewBox="0 0 100 100">
+        <ellipse cx="50" cy="50" rx="35" ry="25" />
+        <path d="M 15 50 Q 5 50 5 40 Q 15 35 20 40" />
+        <path d="M 35 25 L 40 10 L 50 25" />
+        <path d="M 30 70 L 30 85 L 40 85 L 40 73" />
+        <path d="M 60 73 L 60 85 L 70 85 L 70 70" />
+        <path d="M 40 25 L 60 25" />
+        <circle cx="25" cy="40" r="2" fill="#2D2D2D" />
+      </svg>
+      
+      <svg id="asset-icon-05" viewBox="0 0 100 100">
+        <polyline points="10,80 40,50 60,70 90,30" />
+        <polyline points="70,30 90,30 90,50" />
+        <polygon points="10,80 40,50 60,70 90,30 90,90 10,90" stroke="none" fill="rgba(126,205,192,0.2)" />
+      </svg>
+    </div>
+
+    <div id="cta-pay">Pay Upfront</div>
+    <div id="cta-share">Share with a friend</div>
+  </div>
+
+  <script>
+    (function() {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["05-solution"] = tl;
+
+      gsap.set("#bank-icon-05", { opacity: 1, scale: 1 });
+      gsap.set("#asset-icon-05", { opacity: 0 });
+      gsap.set("#no-text", { opacity: 0, y: -20 });
+
+      tl.fromTo("#no-text",
+        { opacity: 0, y: -20 },
+        { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" },
+        0.2
+      );
+
+      for(let i = 0; i < 20; i++) {
+        tl.to("#bank-icon-05", 
+          { rotation: i % 2 === 0 ? 6 : -6, duration: 0.12, ease: "none" },
+          i * 0.12
+        );
+      }
+      tl.to("#bank-icon-05", { rotation: 0, duration: 0.12, ease: "power1.inOut" }, 2.4);
+      
+      const coins = ["#coin1-05", "#coin2-05", "#coin3-05", "#coin4-05"];
+      coins.forEach((coin, idx) => {
+        const startT = 0.3 + idx * 0.4;
+        tl.fromTo(coin,
+          { yPercent: -100, opacity: 0 },
+          { yPercent: 0, opacity: 1, duration: 0.1, ease: "none" },
+          startT
+        );
+        tl.to(coin,
+          { yPercent: 800, opacity: 0, duration: 1.2, ease: "power1.in" },
+          startT + 0.1
+        );
+      });
+
+      tl.to("#bank-icon-05", 
+        { opacity: 0, yPercent: 20, scale: 0.8, duration: 0.5, ease: "power2.in" },
+        2.8
+      );
+
+      tl.fromTo("#asset-icon-05",
+        { opacity: 0, yPercent: 40 },
+        { opacity: 1, yPercent: 0, duration: 0.8, ease: "back.out(1.5)" },
+        2.8
+      );
+      
+      tl.fromTo("#asset-icon-05",
+        { filter: "drop-shadow(6px 6px 0 #2D2D2D)" },
+        { filter: "drop-shadow(6px 6px 0 #2D2D2D) drop-shadow(0 0 15px rgba(126,205,192,0.8))", duration: 1.5, ease: "power2.out" },
+        3.5
+      );
+
+      tl.to("#no-text",
+        { opacity: 0, duration: 0.3 },
+        3.0
+      );
+
+      tl.fromTo("#cta-pay",
+        { scale: 0, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.8, ease: "elastic.out(1, 0.6)" },
+        5.5
+      );
+
+      tl.to("#cta-pay", { scale: 1.05, duration: 0.2, ease: "power1.inOut" }, 6.5);
+      tl.to("#cta-pay", { scale: 1, duration: 0.2, ease: "power1.inOut" }, 6.7);
+
+      tl.fromTo("#cta-share",
+        { scale: 0, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.8, ease: "back.out(1.5)" },
+        7.0
+      );
+    })();
+  </script>
+</template>

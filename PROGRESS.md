@@ -18,6 +18,8 @@
 | **P4 — Publishers** | ⬜ Not started | |
 | **P5 — Reply engine** | ⬜ Not started | |
 | **P6 — Analytics & hardening** | ⬜ Not started | |
+| **YT P1/P2 — Scripting & Audio** | ✅ Completed | LLM Markdown scripts (Gemini) + ElevenLabs TTS integrated in Worker. |
+| **YT P4 — YouTube API Upload** | ⏳ In Progress | Planning phase |
 
 ---
 
