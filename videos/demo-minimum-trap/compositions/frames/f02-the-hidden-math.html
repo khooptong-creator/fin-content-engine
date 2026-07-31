@@ -1,0 +1,81 @@
+<template>
+  <style>
+    [id="f02-the-hidden-math-root"] {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      container-type: size;
+      overflow: hidden;
+    }
+    [id="f02-the-hidden-math-bg"] {
+      position: absolute;
+      inset: 0;
+      background: #0B1220;
+    }
+    [id="f02-the-hidden-math-stage"] {
+      position: absolute;
+      left: 0;
+      top: 10cqh;
+      width: 100%;
+      height: 80cqh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4cqh;
+      padding: 0 8cqw;
+      text-align: center;
+      transform-style: preserve-3d;
+      /* Inherited properties live here, not on the root: the runtime clones the
+         template's contents into the host slot and the inner root element's own
+         styling is dropped, so anything set there silently never applies. */
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      color: #F8FAFC;
+    }
+    [id="f02-the-hidden-math-headline"] {
+      font-size: 5.5cqw; font-weight: 700; line-height: 1.3; color: #CBD5E1;
+    }
+    [id="f02-the-hidden-math-card"] {
+      background: #1B2A4A; border-radius: 4cqw; padding: 6cqh 8cqw;
+      box-shadow: 0 2cqh 6cqh rgba(0,0,0,0.45);
+      display: flex; flex-direction: column; align-items: center; gap: 2cqh;
+    }
+    [id="f02-the-hidden-math-value"] {
+      font-size: 20cqw; font-weight: 800; line-height: 1; color: #F87171;
+      letter-spacing: -0.04em;
+    }
+    [id="f02-the-hidden-math-label"] {
+      font-size: 4.5cqw; font-weight: 600; color: #F8FAFC; text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+  </style>
+
+  <div id="f02-the-hidden-math-root" data-composition-id="f02-the-hidden-math"
+       data-width="1080" data-height="1920" data-duration="8.508">
+    <div class="clip" id="f02-the-hidden-math-bg" data-start="0"
+         data-duration="8.508" data-track-index="0"></div>
+    <div id="f02-the-hidden-math-stage">
+      <div id="f02-the-hidden-math-headline">Interest vs Actual Debt</div>
+      <div id="f02-the-hidden-math-card">
+        <div id="f02-the-hidden-math-value">95% goes to interest</div>
+        <div id="f02-the-hidden-math-label">per payment</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["f02-the-hidden-math"] = tl;
+      tl.fromTo('[id="f02-the-hidden-math-headline"]',
+        { opacity: 0, y: 40 },
+        { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+      tl.fromTo('[id="f02-the-hidden-math-card"]',
+        { opacity: 0, scale: 0.75, rotateX: -30, z: -200 },
+        { opacity: 1, scale: 1, rotateX: 0, z: 0, duration: 0.9, ease: "back.out(1.4)" }, 0.35);
+      tl.fromTo('[id="f02-the-hidden-math-value"]',
+        { opacity: 0, scale: 0.6 },
+        { opacity: 1, scale: 1, duration: 0.6, ease: "back.out(2)" }, 0.7);
+    })();
+  </script>
+</template>

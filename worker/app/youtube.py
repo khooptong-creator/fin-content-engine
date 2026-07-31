@@ -312,14 +312,25 @@ async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_pre
             return row["id"] if row else None
 
 # ElevenLabs voice ids keyed by the storyboard's `preset` field.
+#
+# These must be voices the account can actually reach. The original ids (Antoni,
+# Rachel, Josh, Elli, Gigi) are legacy library voices: on a free plan the API
+# rejects them with 402 paid_plan_required, and every frame silently fell back to
+# silence. Everything below is `premade`, which is free-tier usable.
+# Re-check with: client.voices.get_all() -> category == "premade".
 VOICE_MAP = {
-    "teenage_boy": "ErXwobaYiN019PkySvjV",   # Antoni
-    "teenage_girl": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-    "adult_male": "TxGEqnHWrfWFTfGW9XjX",    # Josh
-    "adult_female": "MF3mGyEYCl7XYWbV9V6O",  # Elli
-    "baby": "jBpfuIE2acCO8z3wKNLl",          # Gigi (child)
+    "teenage_boy": "TX3LPaxmHKxFdv7VOQHJ",   # Liam - energetic social-media creator
+    "teenage_girl": "cgSgspJ2msm6clMCkdW9",  # Jessica - playful, bright, warm
+    "adult_male": "cjVigY5qzO86Huf0OWal",    # Eric - smooth, trustworthy
+    "adult_female": "EXAVITQu4vr4xnSDxMaL",  # Sarah - mature, reassuring
+    "news": "onwK4e9ZLuTAKqWW03F9",          # Daniel - steady broadcaster
+    "baby": "cgSgspJ2msm6clMCkdW9",          # Jessica - no child voice is premade
 }
 DEFAULT_VOICE = "adult_male"
+
+# Free plan allows 2 parallel TTS requests; anything more is rejected with 429.
+TTS_MAX_CONCURRENCY = int(os.environ.get("TTS_MAX_CONCURRENCY", "2"))
+TTS_MAX_ATTEMPTS = 4
 
 
 def _extract_preset(script_content: str) -> str:
@@ -330,12 +341,20 @@ def _extract_preset(script_content: str) -> str:
 
 
 async def _synthesize_line(client: Any, text: str, voice_id: str, output_path: Path) -> None:
-    """Render one narration line to its own mp3."""
-    audio_generator = await client.generate(
-        text=text, voice=voice_id, model="eleven_multilingual_v2"
+    """Render one narration line to its own mp3.
+
+    elevenlabs>=2 removed client.generate(); text_to_speech.convert() replaces it
+    and takes voice_id/model_id rather than voice/model. It is not awaited — it
+    returns the async byte iterator directly.
+    """
+    audio_stream = client.text_to_speech.convert(
+        voice_id=voice_id,
+        text=text,
+        model_id="eleven_multilingual_v2",
+        output_format="mp3_44100_128",
     )
     with open(output_path, "wb") as fh:
-        async for chunk in audio_generator:
+        async for chunk in audio_stream:
             fh.write(chunk)
 
 
@@ -376,21 +395,43 @@ async def _generate_frame_audio(board: Storyboard, video_dir: Path, script_conte
 
     client = AsyncElevenLabs(api_key=api_key)
 
+    # ElevenLabs bills concurrency, not just characters: the free plan allows 2
+    # requests in parallel and 429s the rest. Fanning out one call per frame put
+    # most of a board over that line and silently silenced those frames.
+    gate = asyncio.Semaphore(TTS_MAX_CONCURRENCY)
+    silenced: list[str] = []
+
     async def render(frame: Frame) -> None:
         destination = video_dir / frame.voice_filename
         if not frame.voiceover:
             _write_silence(destination, seconds=2.0)
             return
-        try:
-            await _synthesize_line(client, frame.voiceover, voice_id, destination)
-        except Exception as exc:
-            # One failed line must not cost the whole video; the frame still
-            # occupies time and the storyboard stays intact.
-            log.error("frame_tts_failed", frame=frame.slug, error=str(exc))
-            _write_silence(destination)
+        for attempt in range(TTS_MAX_ATTEMPTS):
+            try:
+                async with gate:
+                    await _synthesize_line(client, frame.voiceover, voice_id, destination)
+                return
+            except Exception as exc:
+                # A concurrency 429 clears on its own, so it is worth waiting out.
+                # Anything else (402, bad voice id) will not, so stop immediately.
+                retryable = "429" in str(exc) or "concurrent_limit" in str(exc)
+                if not retryable or attempt == TTS_MAX_ATTEMPTS - 1:
+                    log.error("frame_tts_failed", frame=frame.slug, error=str(exc)[:200])
+                    break
+                await asyncio.sleep(2 * (attempt + 1))
+        # One failed line must not cost the whole video; the frame still occupies
+        # time and the storyboard stays intact. The caller decides if too many did.
+        silenced.append(frame.slug)
+        _write_silence(destination)
 
     await asyncio.gather(*(render(frame) for frame in board.frames))
-    log.info("frame_audio_generated", frames=len(board.frames), preset=preset)
+    log.info(
+        "frame_audio_generated",
+        frames=len(board.frames),
+        preset=preset,
+        silenced=len(silenced),
+    )
+    return silenced
 
 
 _FRAME_SYSTEM_PROMPT = """You write a single HyperFrames sub-composition: one HTML file that renders one scene of a vertical finance explainer.

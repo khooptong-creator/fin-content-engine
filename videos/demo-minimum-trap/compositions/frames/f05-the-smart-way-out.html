@@ -1,0 +1,88 @@
+<template>
+  <style>
+    [id="f05-the-smart-way-out-root"] {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      container-type: size;
+      overflow: hidden;
+    }
+    [id="f05-the-smart-way-out-bg"] {
+      position: absolute;
+      inset: 0;
+      background: #0B1220;
+    }
+    [id="f05-the-smart-way-out-stage"] {
+      position: absolute;
+      left: 0;
+      top: 10cqh;
+      width: 100%;
+      height: 80cqh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4cqh;
+      padding: 0 8cqw;
+      text-align: center;
+      transform-style: preserve-3d;
+      /* Inherited properties live here, not on the root: the runtime clones the
+         template's contents into the host slot and the inner root element's own
+         styling is dropped, so anything set there silently never applies. */
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      color: #F8FAFC;
+    }
+    [id="f05-the-smart-way-out-headline"] {
+      font-size: 6cqw; font-weight: 800; line-height: 1.25; color: #F8FAFC;
+    }
+    [id="f05-the-smart-way-out-row"] {
+      display: flex; flex-direction: row; gap: 4cqw; width: 100%;
+      transform-style: preserve-3d;
+    }
+    [id="f05-the-smart-way-out-left"], [id="f05-the-smart-way-out-right"] {
+      flex: 1; background: #1B2A4A; border-radius: 3cqw; padding: 4cqh 3cqw;
+      display: flex; flex-direction: column; align-items: center; gap: 2cqh;
+      box-shadow: 0 1.5cqh 4cqh rgba(0,0,0,0.4);
+    }
+    [id="f05-the-smart-way-out-left-title"], [id="f05-the-smart-way-out-right-title"] {
+      font-size: 4cqw; font-weight: 700; color: #CBD5E1;
+    }
+    [id="f05-the-smart-way-out-left-value"] { font-size: 11cqw; font-weight: 800; color: #F87171; }
+    [id="f05-the-smart-way-out-right-value"] { font-size: 11cqw; font-weight: 800; color: #34D399; }
+  </style>
+
+  <div id="f05-the-smart-way-out-root" data-composition-id="f05-the-smart-way-out"
+       data-width="1080" data-height="1920" data-duration="5.191">
+    <div class="clip" id="f05-the-smart-way-out-bg" data-start="0"
+         data-duration="5.191" data-track-index="0"></div>
+    <div id="f05-the-smart-way-out-stage">
+      <div id="f05-the-smart-way-out-headline">Pay Full Balance</div>
+      <div id="f05-the-smart-way-out-row">
+        <div id="f05-the-smart-way-out-left">
+          <div id="f05-the-smart-way-out-left-title">Minimum</div>
+          <div id="f05-the-smart-way-out-left-value">Just Enough</div>
+        </div>
+        <div id="f05-the-smart-way-out-right">
+          <div id="f05-the-smart-way-out-right-title">Full</div>
+          <div id="f05-the-smart-way-out-right-value">Keep More</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["f05-the-smart-way-out"] = tl;
+      tl.fromTo('[id="f05-the-smart-way-out-headline"]',
+        { opacity: 0, y: 40 },
+        { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+      tl.fromTo('[id="f05-the-smart-way-out-left"]',
+        { opacity: 0, x: -120, rotateY: 35 },
+        { opacity: 1, x: 0, rotateY: 0, duration: 0.8, ease: "power3.out" }, 0.4);
+      tl.fromTo('[id="f05-the-smart-way-out-right"]',
+        { opacity: 0, x: 120, rotateY: -35 },
+        { opacity: 1, x: 0, rotateY: 0, duration: 0.8, ease: "power3.out" }, 0.6);
+    })();
+  </script>
+</template>
