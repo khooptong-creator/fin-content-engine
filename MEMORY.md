@@ -125,6 +125,16 @@ docker exec desk-caddy-1 caddy reload --config /etc/caddy/Caddyfile
 9. **sentence-transformers loader needs `HF_HOME` pinned** in the systemd unit, or it treats the model id as a relative path and fails on permissions.
 10. **Host Postgres on 5433, not 5432** — Timescale owns 5432; every `psql`/`.env` must use `-p 5433`.
 
+### YouTube pipeline phase
+11. **Ratio guards cannot catch a truncated input.** `MAX_SILENT_RATIO` and `MAX_PLACEHOLDER_RATIO` both score a one-frame stub at 100%. Length needs its own check (`MIN_SCRIPT_FRAMES`).
+12. **Never fabricate a script when the LLM fails.** The old stub fallback turned a Gemini 503 into a 5-second video recorded as a publishable draft. Retry, then raise.
+13. **Patch the dispatcher, not a backend.** Mocking `_generate_frame_compositions` let `FRAME_BACKEND=local` route around the mock and fire live HTTP at Ollama. Patch `_build_frames`.
+14. **Never infer degradation by value equality.** `plan == heuristic_plan(...)` is a false positive whenever the model legitimately agrees. Return an explicit flag.
+15. **ElevenLabs free tier:** `premade` voices only (library voices → 402), 2 concurrent requests (→ 429), SDK v2 dropped `client.generate()` for `text_to_speech.convert()`.
+16. **The 7B plans each frame in isolation** — it repeats archetypes and drifts into Chinese unless already-used shapes are excluded from the menu and English is pinned in the prompt.
+17. **Don't run `pytest` during an end-to-end run.** DB tests truncate tables; the seeded story vanishes mid-render and surfaces as a `ForeignKeyViolation` that looks like a pool/commit bug.
+18. **Migration 006's columns were dead.** Everything read `body->>'channel_id'`; the real columns sat NULL/default, so any schema-trusting SQL read every draft as `'manual'`. Now written to both.
+
 ---
 
 ## What's NOT in P1 (don't build these yet)
@@ -147,3 +157,4 @@ docker exec desk-caddy-1 caddy reload --config /etc/caddy/Caddyfile
 4. Read `docs/P1-DEPLOY-SOAK-CHECKLIST.md` for the 24h soak.
 5. The blueprint (`fin-content-engine-FINAL-blueprint.md`) is the source of truth for everything after P1.
 6. The YouTube expansion is detailed in `docs/youtube/YT-STRATEGY-OS-FINANCE.md`, `docs/youtube/YT-STRATEGY-OS-BABY.md`, and `docs/youtube/YT-HANDOFF.md`.
+7. **Latest session handoff is at the bottom of `docs/youtube/YT-HANDOFF.md`** (2026-07-31) — first true end-to-end production run, the guards it forced, and the ranked open items.

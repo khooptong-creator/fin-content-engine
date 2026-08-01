@@ -102,6 +102,10 @@
 | 35 | Worker on port 8002, embedder on 8001 | deploy | 5432/8000/443 owned by trading desk |
 | 36 | Add Caddy vhost to `desk-caddy-1`, not a new Caddy | deploy | can't run two Caddys on 443 |
 | 37 | Worker binds `0.0.0.0:8002` + ufw 22/80/443 only | deploy | Caddy reaches via Docker bridge; external blocked |
+| 38 | Frame design local (Ollama `qwen2.5:7b`), story text cloud | youtube | model picks an archetype + fills slots, never writes HTML — a 7B is enough and quota stops being a failure mode |
+| 39 | Archetype templates, not LLM-authored HTML | youtube | a pre-validated template cannot emit an invalid composition |
+| 40 | `MIN_SCRIPT_FRAMES` alongside the ratio guards | youtube | ratios score a one-frame stub at 100%; a failed script was becoming a publishable draft |
+| 41 | Script generation raises instead of falling back to a stub | youtube | there is no safe fabricated script; the caller must abort |
 
 ---
 
