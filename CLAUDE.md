@@ -43,6 +43,40 @@ Cloud is used only where local can't reach the quality bar.
   are gitignored.
 - Assistant commits and pushes; never leave that to the user.
 
+## Tooling — say what you're using, before you use it
+
+The owner does not track the installed roster. **On any non-trivial task, before the
+first edit, state in one line which skill / agent / MCP you're reaching for — or that
+none fits.** Then proceed; it's a recommendation, not a permission request. If the
+right tool is disabled below, say so and quote the re-enable line instead of working
+around it silently.
+
+Enabled here and worth reaching for:
+
+| Need | Reach for |
+|---|---|
+| Any bug, test failure, unexplained render output | `superpowers:systematic-debugging` |
+| New pipeline stage / feature, before writing code | `superpowers:brainstorming`, then `writing-plans` |
+| Guard or ratio logic — the class of bug that ships a degraded video | `superpowers:test-driven-development` |
+| Reviewing a change before commit | `/code-review`, `/security-review` |
+| Commit + push (assistant always does this) | `commit-commands:commit` |
+| Editing this file or the memory files | `claude-md-management`, `update-config` |
+| "Where does X live", cross-project facts, recording a lesson | `lamka-workspace`, `mcp__vault-graph__*` |
+| Video/animation composition work | `hyperframes*` skills |
+| A tool you suspect exists but isn't listed | toolshed digest → `[[Toolshed - Registry]]` → `find-skills` |
+
+Deliberately **off for this repo** (`.claude/settings.local.json`), to cut ~7k tokens
+of fixed overhead from every request: `ecc`, `vercel`, `gitlab`, `resend`,
+`code-modernization`, `pr-review-toolkit`, `plugin-dev`, `mcp-server-dev`,
+`mcp-tunnels`, `agent-sdk-dev`, `skill-creator`, `project-artifact`,
+`frontend-design`, `claude-code-setup`, `ralph-loop`, `cwc-makers`,
+`math-olympiad`, `playground`; plus the claude.ai connectors (Gmail/Calendar/Drive)
+via `disableClaudeAiConnectors`. `LAMKA_SESSION_LITE=1` trims the SessionStart
+injection from ~30 KB to ~1.7 KB — the vault catalog and master-router body become
+on-demand (`Skill(lamka-workspace)`), the toolshed digest still loads.
+
+Re-enable one for a session: flip its entry to `true` in `.claude/settings.local.json`.
+
 ## Commands
 ```powershell
 cd worker; ..\.venv\Scripts\python.exe -m pytest tests -q
