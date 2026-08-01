@@ -45,13 +45,10 @@ Cloud is used only where local can't reach the quality bar.
 
 ## Tooling — say what you're using, before you use it
 
-The owner does not track the installed roster. **On any non-trivial task, before the
-first edit, state in one line which skill / agent / MCP you're reaching for — or that
-none fits.** Then proceed; it's a recommendation, not a permission request. If the
-right tool is disabled below, say so and quote the re-enable line instead of working
-around it silently.
-
-Enabled here and worth reaching for:
+The rule and the workspace-wide plugin/overhead trim live in `~/.claude/CLAUDE.md`
+("Tooling: name it before you use it" + "Session overhead is trimmed on purpose").
+**One line naming the skill / agent / MCP, before the first edit, every non-trivial
+task.** What follows is only this repo's mapping.
 
 | Need | Reach for |
 |---|---|
@@ -65,17 +62,9 @@ Enabled here and worth reaching for:
 | Video/animation composition work | `hyperframes*` skills |
 | A tool you suspect exists but isn't listed | toolshed digest → `[[Toolshed - Registry]]` → `find-skills` |
 
-Deliberately **off for this repo** (`.claude/settings.local.json`), to cut ~7k tokens
-of fixed overhead from every request: `ecc`, `vercel`, `gitlab`, `resend`,
-`code-modernization`, `pr-review-toolkit`, `plugin-dev`, `mcp-server-dev`,
-`mcp-tunnels`, `agent-sdk-dev`, `skill-creator`, `project-artifact`,
-`frontend-design`, `claude-code-setup`, `ralph-loop`, `cwc-makers`,
-`math-olympiad`, `playground`; plus the claude.ai connectors (Gmail/Calendar/Drive)
-via `disableClaudeAiConnectors`. `LAMKA_SESSION_LITE=1` trims the SessionStart
-injection from ~30 KB to ~1.7 KB — the vault catalog and master-router body become
-on-demand (`Skill(lamka-workspace)`), the toolshed digest still loads.
-
-Re-enable one for a session: flip its entry to `true` in `.claude/settings.local.json`.
+Off **here specifically**, on top of the global trim: `vercel` and `frontend-design`
+— this repo renders MP4s, it ships no web UI. Re-enable either by flipping it to
+`true` in `.claude/settings.local.json`.
 
 ## Commands
 ```powershell
