@@ -139,3 +139,130 @@ the pool. It was not — commits work fine.
 4. **Repo hygiene.** `fix_db.py`, `fix_db2.py`, `update_db.py`, `test_run.py`,
    `mock_publish.py`, `seed_mock_story.py` are one-off scratch at the worker
    root and are now tracked.
+
+---
+
+## Session Handoff — 2026-08-03
+
+### Headline
+
+Two things happened: a 3D video capability was designed and planned end to end
+(spec + implementation plan, **no code written**), and the GUI got a working
+generation page with real pipeline progress (**shipped and verified**).
+
+The single most useful discovery is unrelated to either: **the worker could not
+start on this machine at all**, and had not been able to. Every previous
+end-to-end run went through a script, never the served app.
+
+### What shipped — `1967902`
+
+`/films` in the GUI: pick a story, choose Short or Story Film, watch the run
+advance through `script → narration → shots → render → done`.
+
+| Change | Why |
+|---|---|
+| `worker/run_worker.py` | **The blocker.** See below |
+| `supabase/migrations/007_jobs.sql` | `jobs` table. Applied to local `fce` |
+| `worker/app/jobs.py` | Stage records. `STAGES` order is what the GUI draws |
+| `POST /youtube/jobs`, `GET /youtube/jobs/{id}` | Async start + polling |
+| `generate_youtube_video(backend=, job_id=)` | Both optional, so no existing caller or test changed |
+| `_build_frames(board, video_dir, backend=)` | Per-request backend; `FRAME_BACKEND` is now only the default |
+| `gui/src/app/films/page.tsx`, `components/FilmProgress.tsx` | The page and its progress bar |
+
+Verified with a real run, not just a build: reached `done` in ~120s and
+produced a 1080×1920 H.264+AAC draft. Suite **105 passed** (93 before + 12 new).
+
+### The worker would not start on Windows
+
+`uvicorn app.main:app` dies during lifespan startup:
+
+```
+Psycopg cannot use the 'ProactorEventLoop' to run in async mode
+psycopg_pool.PoolTimeout: pool initialization incomplete after 30.0 sec
+```
+
+Setting an event loop **policy** does not fix this, and neither does setting it
+inside `app/main.py`. Since 0.36, uvicorn passes an explicit `loop_factory` to
+`asyncio.run()`, and an explicit factory overrides any policy; uvicorn also
+creates the loop *before* importing the application module. The only thing that
+works is calling `asyncio.run()` yourself with a selector loop and telling
+uvicorn not to supply a factory (`loop="none"`). That is `worker/run_worker.py`.
+
+**Always start the worker with `..\.venv\Scripts\python.exe run_worker.py`.**
+Plain `uvicorn` will never work here.
+
+`tests/conftest.py` solves the same problem the older way, which is why the
+suite passes on a machine where the server will not boot — and why this went
+unnoticed for so long.
+
+### The old progress bar was lying
+
+`GenerateDraftButton` fills 1% per second against a guessed 100-second render
+and shows success on `res.ok`. On a run that aborted at 48s it would sit near
+48% and then report "Sent to Drafts!". The new page reads real stages, which is
+how the Ollama outage below was caught at all. **`GenerateDraftButton` still
+has the simulated bar** — it was left alone deliberately so a working path
+stayed working, but it is now the odd one out.
+
+### Guards fired correctly, twice
+
+First run aborted: Ollama was not running, all 8 frames fell back to heuristic,
+`MAX_PLACEHOLDER_RATIO` refused it. Started Ollama (`qwen2.5:7b`), reran, green.
+Worth noting the local model is **not** started automatically by anything.
+
+### The 3D work — designed, not built
+
+- Spec: `docs/superpowers/specs/2026-08-03-lowpoly-3d-films-design.md`
+- Plan: `docs/superpowers/plans/2026-08-03-lowpoly-3d-films.md` (16 tasks, TDD)
+
+Reference was a 92s 1080p low-poly Hobbit/Bag End film: a persistent set shot
+from many angles, flat-shaded untextured geometry, day→night lighting, bloom,
+burned-in subtitles, kinetic serif type.
+
+Decisions taken with the owner:
+
+| Decision | Choice |
+|---|---|
+| Scope | Phase 1 narrative landscape films; portrait Shorts primitives are Phase 2, separate spec |
+| Characters | **None in v1** — every asset then reduces to code-generated primitives, no Blender, no rigs |
+| Scene model | **Cloud.** Amends the local/cloud table for this backend only; render stays local |
+| What the model emits | **JavaScript against a curated DSL**, not a declarative node schema — composition reaches the reference, a hand-written type list cannot |
+| Mitigation | Headless render gate: sandbox execution, pixel probes at 3 timestamps, cross-frame distinctness, `MIN_VERIFIED_FRAMES` absolute floor, retry-then-raise |
+
+Why the frame contract absorbs this cheaply: `storyboard.py` wires each frame in
+as a sub-composition via `data-composition-src` and has no opinion about the
+file's contents, so a 3D frame is a third producer of the same artifact. A
+persistent set needs no change to the composition unit — every frame imports the
+same `world.js` and places a different camera.
+
+**`FRAME_BACKEND=three` does not exist yet.** The GUI's Story Film toggle maps
+to it and will fail; the page warns in amber when it is selected.
+
+### Start here next session
+
+1. **Task 1 of the plan — the Three.js determinism spike.** A cube making one
+   revolution, rendered, then four stills extracted. If they differ, the
+   approach holds. If they are identical the timeline is not driving the scene;
+   if they are black WebGL is not compositing. Those are different problems and
+   the spike is shaped to tell them apart. **Nothing else in the plan should
+   start until this records a verdict** — a failure invalidates both the DSL
+   and the gate.
+2. Then Tasks 2–11 in order (DSL → shell → probes → gate → authoring →
+   orchestrator → wiring).
+3. Task 15's shot inspector was deferred with the rest of the 3D work; the
+   `/films` page has no inspector yet.
+
+### Still open from before
+
+Unchanged: YouTube **upload has still never executed** — the OAuth path remains
+the only completely unproven stage. Frame pacing still blows the 12s soft
+ceiling. Worker-root scratch files are still tracked.
+
+### Gotcha, repeated the hard way
+
+Running `pytest` **after** a completed end-to-end run still truncates `stories`
+and `drafts`. It cost the verified draft row from this session's green run — the
+mp4 survived on disk, the row did not. Re-seed with
+`..\.venv\Scripts\python.exe seed_mock_story.py`. The existing note said "not
+during a run"; the accurate rule is "not against the `fce` database at all when
+you care about its contents".
