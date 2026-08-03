@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, FileText, Settings, BookOpen } from "lucide-react";
+import { Inbox, FileText, Settings, BookOpen, Clapperboard } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 
 export function Sidebar() {
@@ -10,6 +10,7 @@ export function Sidebar() {
 
   const navItems = [
     { name: "Inbox", href: "/", icon: Inbox },
+    { name: "Generate", href: "/films", icon: Clapperboard },
     { name: "Drafts Queue", href: "/drafts", icon: FileText },
     { name: "Voice & Config", href: "/settings", icon: Settings },
     { name: "Documentation", href: "/docs", icon: BookOpen },

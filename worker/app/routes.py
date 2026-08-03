@@ -22,6 +22,11 @@ from app.db import ping as db_ping, stats as db_stats
 
 router = APIRouter()
 
+# Background generation tasks are held here for their lifetime. asyncio keeps
+# only a weak reference to a bare create_task(), so without this a long render
+# can be garbage-collected mid-run.
+_RUNNING_JOBS: set = set()
+
 
 @router.get("/health")
 async def health(request: Request) -> JSONResponse:
@@ -68,6 +73,31 @@ class YouTubeGenerateRequest(BaseModel):
     upload_preference: str = "manual"
 
 
+class YouTubeJobRequest(BaseModel):
+    story_id: str
+    channel_id: str = "default"
+    upload_preference: str = "manual"
+    mode: str | None = None
+
+
+# "short" keeps whatever FRAME_BACKEND is configured; "film" forces the 3D path.
+MODE_BACKENDS: dict[str, str | None] = {"short": None, "film": "three"}
+
+
+def backend_for_mode(mode: str | None) -> str | None:
+    """Map the GUI's format toggle to a frame backend.
+
+    `None` means "use the FRAME_BACKEND default", which is what a Short wants.
+    An unrecognised mode raises rather than defaulting, so a typo cannot
+    quietly publish a portrait 2D video under a film's headline.
+    """
+    if mode is None:
+        return None
+    if mode not in MODE_BACKENDS:
+        raise ValueError(f"unknown mode {mode!r}; expected one of {sorted(MODE_BACKENDS)}")
+    return MODE_BACKENDS[mode]
+
+
 class YouTubePublishRequest(BaseModel):
     draft_id: str
 
@@ -96,6 +126,76 @@ async def youtube_generate(req: YouTubeGenerateRequest) -> dict:
         print(f"Error in youtube_generate: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/youtube/jobs")
+async def youtube_job_start(req: YouTubeJobRequest) -> dict:
+    """Start a generation run in the background and return its job id.
+
+    Separate from POST /youtube/generate, which blocks until the render
+    finishes and is what the existing Drafts button relies on. Adding a second
+    surface leaves that path exactly as it is.
+    """
+    import asyncio
+
+    from app.jobs import create_job, fail_job, finish_job
+    from app.youtube import generate_youtube_video
+
+    try:
+        sid = uuid.UUID(req.story_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid story_id (must be a uuid)")
+
+    try:
+        backend = backend_for_mode(req.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    job_id = await create_job(kind=req.mode or "short", story_id=sid)
+
+    async def run() -> None:
+        try:
+            draft_id = await generate_youtube_video(
+                story_id=sid,
+                channel_id=req.channel_id,
+                upload_preference=req.upload_preference,
+                backend=backend,
+                job_id=job_id,
+            )
+            if draft_id is None:
+                # A guard refused the video. That is a completed decision, not a
+                # crash, and the reason is already in the worker log.
+                await fail_job(job_id, "generation aborted by a quality guard; see worker logs")
+            else:
+                await finish_job(job_id, draft_id)
+        except Exception as exc:  # noqa: BLE001
+            await fail_job(job_id, str(exc))
+
+    # Held so the task is not garbage-collected mid-render.
+    task = asyncio.create_task(run())
+    _RUNNING_JOBS.add(task)
+    task.add_done_callback(_RUNNING_JOBS.discard)
+
+    return {"job_id": str(job_id)}
+
+
+@router.get("/youtube/jobs/{job_id}")
+async def youtube_job_status(job_id: str) -> dict:
+    """Current stage of a run. Polled by the GUI."""
+    from app.jobs import get_job
+
+    try:
+        jid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid job_id (must be a uuid)")
+
+    job = await get_job(jid)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {
+        key: (str(value) if isinstance(value, uuid.UUID) else value)
+        for key, value in job.items()
+    }
 
 
 @router.post("/youtube/publish")

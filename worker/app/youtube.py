@@ -72,13 +72,40 @@ def _get_youtube_credentials(scopes: list[str]) -> Any:
     return creds
 
 
-async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_preference: str = "manual") -> uuid.UUID | None:
+async def _stage(job_id, stage: str, done: int = 0, total: int = 0) -> None:
+    """Report progress when a job is tracking this run, otherwise do nothing.
+
+    Progress is optional so the original synchronous entrypoint — and every
+    test that drives it — keeps working untouched.
+    """
+    if job_id is None:
+        return
+    from app.jobs import set_stage
+
+    try:
+        await set_stage(job_id, stage, done, total)
+    except Exception as exc:  # noqa: BLE001
+        # Losing a progress update must never abort a render that is otherwise fine.
+        log.warning("stage_update_failed", stage=stage, error=str(exc))
+
+
+async def generate_youtube_video(
+    story_id: uuid.UUID,
+    channel_id: str,
+    upload_preference: str = "manual",
+    backend: str | None = None,
+    job_id: uuid.UUID | None = None,
+) -> uuid.UUID | None:
     """
     Main entrypoint for generating a YouTube video from a story.
     Triggered via GUI dashboard.
+
+    `backend` selects the frame backend for this run only, so one worker can
+    produce both formats without an env change or a restart; `FRAME_BACKEND`
+    supplies the default. `job_id`, when given, receives stage progress.
     """
     log.info("youtube_generation_started", story_id=str(story_id), channel_id=channel_id)
-    
+
     # 1. Fetch story details
     story = await _fetch_story_details(story_id)
     if not story:
@@ -90,6 +117,7 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     video_dir.mkdir(parents=True, exist_ok=True)
     
     # 2. Scripting & Storyboard Generation
+    await _stage(job_id, "script")
     try:
         script_content = await _generate_script_for_story(story, channel_id)
     except Exception as e:
@@ -118,6 +146,7 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
         return None
 
     log.info("youtube_audio_generation_started", video_dir=str(video_dir), frames=len(board.frames))
+    await _stage(job_id, "narration", 0, len(board.frames))
     silenced = await _generate_frame_audio(board, video_dir, script_content)
     if silenced:
         # Silence renders and validates exactly like narration, so nothing
@@ -147,7 +176,8 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
     duration = board.total_duration
     log.info("storyboard_compiled", frames=len(board.frames), duration=duration)
 
-    placeholders = await _build_frames(board, video_dir)
+    await _stage(job_id, "shots", 0, len(board.frames))
+    placeholders = await _build_frames(board, video_dir, backend=backend)
     if placeholders:
         # A placeholder renders fine and passes validation, so nothing downstream
         # would notice that most of the video is fallback title cards. Refuse to
@@ -171,6 +201,8 @@ async def generate_youtube_video(story_id: uuid.UUID, channel_id: str, upload_pr
             encoding="utf-8",
         )
     
+    await _stage(job_id, "render")
+
     import sys
     import subprocess
     from starlette.concurrency import run_in_threadpool
@@ -549,9 +581,17 @@ Text must be legible at a glance: display type at least 7cqw, body at least 4.5c
 FRAME_BACKEND = os.environ.get("FRAME_BACKEND", "local").lower()
 
 
-async def _build_frames(board: Storyboard, video_dir: Path) -> list[str]:
-    """Dispatch frame generation to the configured backend."""
-    if FRAME_BACKEND == "gemini":
+async def _build_frames(
+    board: Storyboard, video_dir: Path, backend: str | None = None
+) -> list[str]:
+    """Dispatch frame generation to the requested backend.
+
+    Backend is per request so a single running worker can produce both a
+    portrait 2D Short and a landscape 3D film without an env change or a
+    restart; FRAME_BACKEND only supplies the default.
+    """
+    chosen = (backend or FRAME_BACKEND).lower()
+    if chosen == "gemini":
         return await _generate_frame_compositions(board, video_dir)
     return await _generate_frame_compositions_local(board, video_dir)
 
