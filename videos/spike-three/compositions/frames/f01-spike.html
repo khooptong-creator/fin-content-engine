@@ -1,0 +1,56 @@
+<template>
+  <style>
+    [id="f01-spike-root"] { width:100%; height:100%; position:relative; overflow:hidden; }
+    [id="f01-spike-bg"] { position:absolute; inset:0; background:#0B1220; }
+    [id="f01-spike-canvas"] { position:absolute; inset:0; width:100%; height:100%; }
+  </style>
+
+  <div id="f01-spike-root" data-composition-id="f01-spike"
+       data-width="1920" data-height="1080" data-duration="4">
+    <div class="clip" id="f01-spike-bg" data-start="0"
+         data-duration="4" data-track-index="0"></div>
+    <canvas id="f01-spike-canvas"></canvas>
+  </div>
+
+  <script src="assets/three.min.js"></script>
+  <script>
+    // THREE is a global. Frames must
+    // never `import` — this block runs as a classic script.
+    const canvas = document.getElementById('f01-spike-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(1920, 1080, false);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, 1920 / 1080, 0.1, 100);
+    camera.position.set(0, 2, 6);
+    camera.lookAt(0, 0, 0);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+    sun.position.set(3, 5, 2);
+    scene.add(sun);
+
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 2),
+      new THREE.MeshLambertMaterial({ color: 0x38BDF8, flatShading: true })
+    );
+    scene.add(cube);
+
+    // The whole point of the spike: state is driven by the timeline, and the
+    // render happens in onUpdate. No requestAnimationFrame, no Date.now().
+    const state = { spin: 0 };
+    const tl = gsap.timeline({
+      paused: true,
+      onUpdate: () => {
+        cube.rotation.y = state.spin;
+        renderer.render(scene, camera);
+      },
+    });
+    tl.to(state, { spin: Math.PI * 2, duration: 4, ease: 'none' }, 0);
+
+    window.__timelines = window.__timelines || {};
+    window.__timelines['f01-spike'] = tl;
+
+    renderer.render(scene, camera);
+  </script>
+</template>
