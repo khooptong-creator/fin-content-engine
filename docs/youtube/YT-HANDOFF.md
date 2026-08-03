@@ -266,3 +266,77 @@ mp4 survived on disk, the row did not. Re-seed with
 `..\.venv\Scripts\python.exe seed_mock_story.py`. The existing note said "not
 during a run"; the accurate rule is "not against the `fce` database at all when
 you care about its contents".
+
+---
+
+## Session Handoff — 2026-08-03 (session 2: the Three.js spike)
+
+### Headline
+
+**Task 1 of the 3D plan is done and the verdict is PASS.** Three.js renders
+deterministically under HyperFrames' paused-timeline seek, so the DSL and the
+gate are both viable and Tasks 2–16 are unblocked.
+
+It failed on the first attempt, and that failure is the useful part: the render
+**exited 0 and produced a valid 4.0s MP4 with no cube in it**. Same shape as
+every guard bug in this repo — a broken run that passes every checkpoint.
+
+Shipped as `4ebbc0b`. Verdict recorded in
+`docs/superpowers/plans/2026-08-03-spike-result.md`.
+
+### The evidence
+
+Six frames across one 90° sector of the cube's 2π spin (0°, 15°, 30°, 45°, 60°,
+75°): six distinct MD5s and a visibly monotonic turn. Two independent renders
+produced **byte-identical frames** at all six points — determinism proven, not
+assumed. Post-fix render health: timelines ready in 633ms, zero correctness
+warnings, 283.1 KB / 4.0s, 9.0s wall clock (the broken run took 98s and made
+11.2 KB).
+
+Render browser has **hardware WebGL** (ANGLE / NVIDIA RTX 3070 / D3D11), so the
+"WebGL photographs black" risk the plan hedged against is off the table.
+
+### Four corrections the plan must absorb
+
+| # | Finding | Affects |
+|---|---|---|
+| 1 | Sub-composition scripts execute as **classic scripts** — `type="module"` is dropped, so `import` in a frame is a parse-time SyntaxError that silently kills the whole script body | **Task 2 is stale.** It vendors `three.module.js`; must be `three.min.js`, UMD **r160.1** — the last non-ESM release |
+| 2 | Asset paths must be project-root-relative (`assets/three.min.js`). `../` fails lint; lint also requires the three script **per file** | Task 4 shell — every generated frame carries its own `<script src>`, so frames stay self-contained |
+| 3 | `check`'s `sweep_static` is a **false positive** for pure-WebGL frames — it fingerprints DOM geometry, which a canvas never changes | Task 7 gate must judge motion from canvas pixels only. Do not add a `check`-based motion assertion |
+| 4 | The plan's own probe sampling (frames 0/30/60/90 of a 2π spin) lands exactly on the cube's 4-fold symmetry points, where a working and a frozen render are pixel-identical | Task 6/7 probe timestamps must not be harmonics of the motion they measure. Prefer 0.13 / 0.41 / 0.87 over evenly spaced |
+
+Correction 4 is the one to internalise. The plan's verification step was blind to
+the exact thing it existed to measure, and the first reading of this spike was a
+false FAIL because of it. `MIN_SCRIPT_FRAMES` all over again.
+
+### How the root cause was actually found
+
+The render log only said `sub_timeline_readiness_timeout`. What gave the answer
+in one line was:
+
+```powershell
+npx hyperframes check --json
+# page_error: "Cannot use import statement outside a module"
+```
+
+**Reach for `check --json` first on any render that succeeds but looks wrong.**
+It reports console errors and failed network requests that the render log does
+not. Note its output is preceded by a non-JSON banner line, so slice from the
+first `{` before `ConvertFrom-Json`.
+
+### Start here next session
+
+1. **Patch Task 2's vendoring instruction** in
+   `docs/superpowers/plans/2026-08-03-lowpoly-3d-films.md` — as written it
+   reintroduces correction 1 verbatim. This was offered and not yet done.
+2. Then Task 2 (vendor Three.js + build the primitives DSL) and on through
+   Tasks 3–11 in order.
+3. Corrections 3 and 4 land in Tasks 6/7; re-read the spike result before
+   writing the gate.
+
+### Unchanged
+
+`FRAME_BACKEND=three` still does not exist — the Story Film toggle still fails
+and still warns in amber. Upload has still never executed. No tests were run
+this session (nothing in `worker/` was touched), so the suite stands at the 105
+from the previous session.
