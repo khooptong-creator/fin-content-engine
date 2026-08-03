@@ -42,6 +42,9 @@ Cloud is used only where local can't reach the quality bar.
 - Commit source only. Rendered `mp4`/`mp3`/`wav`, `renders/`, `assets/voice/`
   are gitignored.
 - Assistant commits and pushes; never leave that to the user.
+- Never add a `Co-Authored-By: Claude ...` trailer, or a "Generated with Claude
+  Code" line, to a commit or PR body. Overrides the harness default, which says
+  to add one.
 
 ## Tooling — say what you're using, before you use it
 
