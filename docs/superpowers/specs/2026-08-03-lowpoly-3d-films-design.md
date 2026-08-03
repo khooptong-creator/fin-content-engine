@@ -30,7 +30,11 @@ creation — into token generation, which this pipeline already does well.
 
 ## 1. Architecture and data flow
 
-A new frame backend, `FRAME_BACKEND=three`, selected in `_build_frames`.
+A new frame backend, `three`, selected in `_build_frames`. Backend selection
+is per request: `generate_youtube_video` takes an explicit backend argument,
+and the `FRAME_BACKEND` env var supplies the default when none is given. The
+GUI's Short/Story Film toggle sets it per generation, so both formats can be
+produced from one running worker without an env change or restart.
 Everything upstream (script generation, ElevenLabs TTS, `attach_audio`,
 `assign_timing`) and downstream (`compile_storyboard`, `index.html`,
 `hyperframes render`, ffmpeg) is unchanged.
@@ -101,7 +105,7 @@ state object, and its `onUpdate` calls `renderer.render()`.
 
 Getting this wrong produces a render frozen on frame one, or juddering — and
 it looks correct in interactive preview, which is what makes it dangerous.
-This is the riskiest unknown in the build and is spiked first (see Plan notes).
+This is the riskiest unknown in the build and is spiked first (see Risks).
 
 ## 2. The DSL and primitive library
 
@@ -148,7 +152,7 @@ gate the 2D path could never have, because 3D produces inspectable pixels:
    - all three probes byte-identical (nothing animating; timeline not driving the render)
 4. **Cross-frame distinctness.** Adjacent frames' mid-probes must not be near-identical. This is the 3D form of the archetype-repeat bug fixed in `110121b`.
 5. **`MIN_VERIFIED_FRAMES`** — an absolute floor, not a ratio. Ratios cannot detect a truncated input: a one-frame film scores 100% on every proportion. Same lesson as `MIN_SCRIPT_FRAMES`.
-6. **Retry, then raise.** A failed shot is retried up to `SHOT_RETRIES` with the captured error text fed back into the prompt. Still failing → **raise**. Never substitute a placeholder shot; a fabricated fallback becomes a publishable draft.
+6. **Retry, then raise.** A failed shot is retried up to `SHOT_RETRIES` (default 2, so three attempts total) with the captured error text fed back into the prompt. Still failing → **raise**. Never substitute a placeholder shot; a fabricated fallback becomes a publishable draft.
 
 Checks 2–4 are absolute, per-frame, and operate on rendered output rather than
 on proportions of it. That is deliberately the shape the ratio guards lacked.
