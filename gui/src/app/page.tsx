@@ -1,4 +1,5 @@
 import { Calendar, TrendingUp, Users, Video, FileText, Inbox } from "lucide-react";
+import AddIdeaForm from "@/components/AddIdeaForm";
 import GenerateDraftButton from "@/components/GenerateDraftButton";
 
 export default async function Home() {
@@ -62,24 +63,7 @@ export default async function Home() {
       <div className="mt-10 glass-panel rounded-3xl overflow-hidden shadow-2xl">
         <div className="px-6 py-5 border-b border-border bg-foreground/[0.02] flex justify-between items-center">
           <h2 className="text-lg font-bold text-foreground tracking-wide">Pending Stories <span className="text-foreground/40 font-normal ml-2">Needs Draft</span></h2>
-          <form action={async (formData: FormData) => {
-            "use server";
-            const headline = formData.get("headline") as string;
-            if (headline) {
-              await fetch("http://127.0.0.1:8000/stories/manual", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ headline }),
-              });
-              const { revalidatePath } = await import("next/cache");
-              revalidatePath("/");
-            }
-          }} className="flex items-center space-x-2">
-            <input type="text" name="headline" placeholder="Enter Original Idea..." required className="px-4 py-2.5 rounded-xl border border-border bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 w-96 shadow-sm" />
-            <button type="submit" className="px-4 py-2.5 bg-primary/10 text-primary font-bold text-base rounded-xl hover:bg-primary/20 transition-colors">
-              Add Idea
-            </button>
-          </form>
+          <AddIdeaForm />
         </div>
         
         <div className="divide-y divide-border/50">
@@ -106,7 +90,7 @@ export default async function Home() {
                   </div>
                 </div>
                 <div className="opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all duration-300">
-                  <GenerateDraftButton storyId={story.id} />
+                  <GenerateDraftButton storyId={story.id} storyChannelId={story.channel_id} />
                 </div>
               </div>
             ))

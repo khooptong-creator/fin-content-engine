@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Clapperboard, Loader2, Smartphone } from "lucide-react";
 
+import ChannelSelect, { readErrorDetail, useChannels } from "@/components/ChannelSelect";
 import FilmProgress from "@/components/FilmProgress";
 
 type Story = { id: string; title: string };
@@ -24,8 +25,10 @@ const MODES: { id: Mode; label: string; detail: string; icon: typeof Smartphone 
 ];
 
 export default function FilmsPage() {
+  const { channels, error: channelsError } = useChannels();
   const [stories, setStories] = useState<Story[]>([]);
   const [storyId, setStoryId] = useState("");
+  const [channelId, setChannelId] = useState("");
   const [mode, setMode] = useState<Mode>("short");
   const [jobId, setJobId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,13 +49,13 @@ export default function FilmsPage() {
       const res = await fetch("/api/youtube/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ story_id: storyId, channel_id: "default", mode }),
+        body: JSON.stringify({ story_id: storyId, channel_id: channelId, mode }),
       });
-      const data = await res.json();
       if (!res.ok) {
-        setError(data.detail ?? "Could not start the run.");
+        setError(await readErrorDetail(res, "Could not start the run"));
         return;
       }
+      const data = await res.json();
       setJobId(data.job_id);
     } catch {
       setError("Could not reach the worker. Is it running on port 8000?");
@@ -96,6 +99,23 @@ export default function FilmsPage() {
 
         <div className="space-y-2">
           <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-foreground/40">
+            Channel
+          </label>
+          {/* Explicit, always. The channel decides the voice and the script
+              prompt, and a run started under the wrong one is only visible
+              once you watch the finished video. */}
+          <ChannelSelect
+            value={channelId}
+            onChange={setChannelId}
+            channels={channels}
+            disabled={busy}
+            className="w-full px-4 py-3 text-base"
+          />
+          {channelsError && <p className="text-xs text-red-400">{channelsError}</p>}
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-foreground/40">
             Format
           </label>
           <div className="grid grid-cols-2 gap-3">
@@ -131,7 +151,7 @@ export default function FilmsPage() {
 
         <button
           onClick={generate}
-          disabled={!storyId || busy}
+          disabled={!storyId || !channelId || busy}
           className="flex items-center space-x-2 rounded-xl bg-primary px-5 py-3 font-semibold text-foreground transition-all hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed"
         >
           {busy && <Loader2 className="w-4 h-4 animate-spin" />}
