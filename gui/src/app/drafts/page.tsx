@@ -6,12 +6,21 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 function CopyField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "unavailable">("idle");
 
   async function copy() {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (!navigator.clipboard) {
+      setCopyState("unavailable");
+      setTimeout(() => setCopyState("idle"), 1500);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyState("copied");
+    } catch {
+      setCopyState("unavailable");
+    }
+    setTimeout(() => setCopyState("idle"), 1500);
   }
 
   return (
@@ -23,7 +32,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
           disabled={!value}
           className="text-xs rounded-lg border border-foreground/10 px-2 py-1 text-foreground/60 hover:text-foreground hover:border-foreground/20 transition-colors disabled:opacity-40"
         >
-          {copied ? "Copied" : "Copy"}
+          {copyState === "copied" ? "Copied" : copyState === "unavailable" ? "Copy unavailable" : "Copy"}
         </button>
       </div>
       <p className="whitespace-pre-wrap text-sm text-foreground/70">{value || "Not generated"}</p>
