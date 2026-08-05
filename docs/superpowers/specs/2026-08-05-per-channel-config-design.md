@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-05
 **Status:** Approved, awaiting implementation plan
-**Scope:** Per-channel script generation config. Uploads are manual and out of scope.
+**Scope:** Per-channel script generation config, plus the upload metadata a manual
+upload needs. Automated publishing is removed.
 
 ## Problem
 
@@ -40,6 +41,10 @@ body. The plumbing exists. Only the resolution step is missing.
 | 5 | The `activeProfileId` code path is deleted, not left as a fallback | A retained fallback is a silent wrong-brand path. Values are copied forward first, so no data is lost. |
 | 6 | Uploads stay manual; no per-channel OAuth | Owner uploads to each account by hand. Removes per-channel token files, the `made_for_kids` API field, and the whole credential surface from this spec. |
 | 7 | **Compliance rules and the base blocklist are code constants, not config** | They must always hold. In config they are one careless GUI edit away from being removed, and that edit leaves no trace. In code they are covered by a test. Channels may *add* terms, never remove them. |
+| 8 | The publish path is removed, not gated | Uploads are manual. A dormant button that hardcodes `selfDeclaredMadeForKids: False` is a live hazard, and a disabled-by-default flag is a compatibility layer around dead code. Delete it. |
+| 9 | Upload metadata is delivered two ways | The drafts page is where the owner works, so copy buttons belong there. The text file means metadata survives a database reset and travels with the MP4. |
+
+
 
 ## Compliance floor
 
@@ -62,6 +67,43 @@ constant.
 
 This applies to the kids channel too. It costs nothing there and means no channel
 can ever be created that lacks the floor.
+
+## Upload metadata
+
+Every generated video must arrive with the text needed to upload it by hand.
+
+The generator already produces this. `_generate_script_for_story` instructs the
+model to emit YAML frontmatter containing `title` and a *"highly detailed,
+SEO-optimized description"* (`youtube.py:306`), and `_parse_frontmatter`
+(`youtube.py:1063`) extracts both. The defect is the call site: extraction
+happens only inside the publish path at `youtube.py:1113`, so with publishing
+removed the description would be generated and then discarded.
+
+The fix moves extraction earlier and persists the result:
+
+1. After the script is generated, parse `title` and `description` from
+   frontmatter.
+2. Store both in the draft body alongside `channel_id`.
+3. Write `upload.txt` into the task directory, next to the final MP4, containing
+   the title and description as plain text ready to paste.
+4. Show both on the drafts page with copy buttons.
+
+If `description` is absent or empty, the draft records the failure rather than
+substituting the title. A silent title-as-description fallback exists today at
+`youtube.py:1113` (`description = frontmatter.get("description") or title`) and
+is removed with the rest of that path. An empty description is a generation
+problem worth seeing, not worth papering over.
+
+**Compliance applies to the description.** It is produced by the same LLM call,
+under the same system instruction, so `BASE_COMPLIANCE_RULES` and the effective
+blocklist already govern it. The instruction is made explicit that the forbidden
+terms cover frontmatter as well as narration, and a test asserts it.
+
+A post-generation blocklist scan of the description is deliberately **not**
+added. The script has no such scan, so adding one for the description alone
+would be inconsistent, and naive substring matching produces false positives on
+ordinary words (`buyback`, `sell-off`). If a scan is wanted later it should cover
+both fields, match on word boundaries, and be specified in its own change.
 
 ## Data model
 
@@ -101,6 +143,10 @@ channel, recorded here so it is not rediscovered later.
 | `_generate_script_for_story(story, channel)` | Uses `channel.script_prompt` and `channel.effective_blocklist`. Compliance rules come from the constant. `activeProfileId` lookup removed. | `channels.Channel` |
 | `routes.py` | `channel_id` loses its `"default"` value; becomes required. Maps `ChannelConfigError` to HTTP 400. | `channels.resolve` |
 | `gui/src/app/settings` | Channel selector; prompt and extra-blocklist fields edit the selected channel. Base blocklist shown read-only. | `/config/channels` |
+| `_parse_frontmatter` | Unchanged, but called from `generate_youtube_video` instead of the publish path. Its `or title` fallback is dropped. | — |
+| `upload.txt` writer (new, in `youtube.py`) | Writes title and description into the task directory beside the MP4. | `_parse_frontmatter` |
+| `gui/src/app/drafts` | Publish button removed. Title and description displayed with copy buttons. | `/drafts` |
+| **Removed:** `routes.py:/youtube/publish`, `_upload_to_youtube`, `_get_youtube_credentials` | Dead once uploads are manual. | — |
 
 The config API needs no change: `routes.py:277` already exposes a generic
 `GET/PUT /config/{key}`, so `/config/channels` works as soon as the key exists.
@@ -114,9 +160,11 @@ The config API needs no change: `routes.py:277` already exposes a generic
 POST /youtube/generate {story_id, channel_id}
   -> channels.resolve(channel_id) -> Channel     (fails here or not at all)
   -> _generate_script_for_story(story, channel)  (channel prompt + base rules + union blocklist)
+  -> _parse_frontmatter(script) -> title, description
   -> frames -> render -> final MP4 on disk
-  -> _record_youtube_draft(channel_id)
-  -> owner uploads manually
+  -> write upload.txt beside the MP4
+  -> _record_youtube_draft(channel_id, title, description)
+  -> owner uploads manually, pasting title + description, ticking Made for kids
 ```
 
 The `Channel` is resolved once at the top of `generate_youtube_video` and passed
@@ -139,8 +187,11 @@ Tests must not touch the network; patch `_build_frames`, not a backend.
 | `resolve()` | With `db.get_config` patched: returns the right channel, raises on unknown id. |
 | Generate without `channel_id` | Request rejected, no job created. |
 | **Compliance floor** | A channel whose `extra_blocklist` omits base terms still yields all base terms in `effective_blocklist`. A channel cannot suppress a base term. |
-| **Compliance in prompt** | The generated system instruction contains `BASE_COMPLIANCE_RULES` verbatim for every channel, including kids. |
+| **Compliance in prompt** | The generated system instruction contains `BASE_COMPLIANCE_RULES` verbatim for every channel, including kids, and states that forbidden terms cover frontmatter as well as narration. |
 | Two channels | Each resolves to a different prompt and voice key. |
+| Metadata extraction | `title` and `description` are parsed from frontmatter and stored on the draft. |
+| Empty description | A script whose frontmatter has no description records the failure. It does not fall back to the title. |
+| `upload.txt` | Written into the task directory, contains the title and description. |
 
 ## Migration
 
@@ -157,18 +208,22 @@ rows are not modified.
 ## Manual upload, and what moves to the owner
 
 Because uploads are manual, the `selfDeclaredMadeForKids` designation is no
-longer set by this system. **It becomes the owner's responsibility to mark kids
-videos as "Made for kids" in YouTube Studio at upload time.** This is a COPPA
-obligation, not a preference.
+longer set by this system. **It becomes the owner's responsibility to tick "Made
+for kids" in YouTube Studio when uploading toddler content.** This is a COPPA
+obligation, not a preference. `upload.txt` carries a reminder line for the kids
+channel.
 
-`youtube.py` retains a `/youtube/publish` path with `selfDeclaredMadeForKids`
-hardcoded `False`, reachable from a button on the drafts page. It is now dormant
-but not disabled. Recommendation, small and outside this spec's core: gate it
-behind `FCE_PUBLISH_ENABLED`, defaulting off, so an unused path cannot publish a
-kids video under a false designation by accident.
+The publish path is deleted: the drafts-page button, the `/youtube/publish`
+route, `_upload_to_youtube`, and `_get_youtube_credentials` all go, along with
+the `google-auth` upload imports they pull in.
+
+`GET /youtube/analytics` is left in place. It reads `published_ids` from existing
+draft rows, which is data already written, but it will show nothing new because
+nothing records a video id any more. Whether to feed it manually entered ids, or
+remove it, is a separate decision and not part of this spec.
 
 ## Out of scope
 
-Per-channel OAuth and automated upload. Kids topic backlog, kids rendering
-approach, 3D animation research. The kids channel cannot produce video until its
-rendering path is decided in a separate spec.
+Per-channel OAuth and automated upload. A post-generation blocklist scan. Kids
+topic backlog, kids rendering approach, 3D animation research. The kids channel
+cannot produce video until its rendering path is decided in a separate spec.
