@@ -19,7 +19,8 @@
 | **P5 — Reply engine** | ⬜ Not started | |
 | **P6 — Analytics & hardening** | ⬜ Not started | |
 | **YT P1/P2 — Scripting & Audio** | ✅ Completed | LLM Markdown scripts (Gemini) + ElevenLabs TTS integrated in Worker. |
-| **YT P4 — YouTube API Upload** | ⏳ In Progress | Planning phase |
+| **YT P4 — YouTube API Upload** | ❌ Dropped | Uploads are manual. Publish path deleted 2026-08-06; see YT P5. |
+| **YT P5 — Per-channel config** | ✅ Merged | Two channels (finance, kids) off one engine. Compliance floor as code constants. Every render ships `upload.txt` with title + SEO description. Migration 008 and the `channels` config applied to local and VPS Postgres. **Code not yet deployed to the VPS** — it still runs `16e867a`. |
 
 ---
 
@@ -106,6 +107,13 @@
 | 39 | Archetype templates, not LLM-authored HTML | youtube | a pre-validated template cannot emit an invalid composition |
 | 40 | `MIN_SCRIPT_FRAMES` alongside the ratio guards | youtube | ratios score a one-frame stub at 100%; a failed script was becoming a publishable draft |
 | 41 | Script generation raises instead of falling back to a stub | youtube | there is no safe fabricated script; the caller must abort |
+| 42 | Channels are a fixed pair in the `config` table, not a new table | channels | two channels; a table plus CRUD buys generality nothing needs |
+| 43 | Compliance rules + base blocklist are code constants, not config | channels | in config they were one GUI edit from removal, with no trace |
+| 44 | Effective blocklist is a **union**, not an override | channels | removing a base term becomes inexpressible rather than merely validated against |
+| 45 | Uploads are manual; publish path deleted, not gated | channels | a dormant button hardcoding `selfDeclaredMadeForKids: False` is a live COPPA hazard |
+| 46 | Metadata extracted at generation time, not publish time | channels | `_parse_storyboard_frontmatter` was only called from publish; deleting publish would have discarded the SEO description |
+| 47 | Metadata validated **before** the render | channels | an empty description used to burn a full ffmpeg render before failing |
+| 48 | Autopilot uses each story's own channel, skips those without one | channels | one env-var channel applied to every story would publish kids topics in the finance voice, on a daily timer |
 
 ---
 
