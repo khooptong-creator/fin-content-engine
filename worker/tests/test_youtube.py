@@ -1,14 +1,23 @@
 import uuid
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
+from app.channels import Channel
 from app.youtube import (
     generate_youtube_video,
     publish_youtube_draft,
     _get_youtube_credentials,
     _parse_storyboard_frontmatter,
+)
+
+FINANCE = Channel(
+    id="financial-channel",
+    display_name="Finance",
+    voice_key="adult_male",
+    script_prompt="You are a casual, humorous, informative adult male.",
+    extra_blocklist=(),
 )
 
 # Long enough to clear MIN_SCRIPT_FRAMES. Tests that assert on ratios need a
@@ -24,6 +33,7 @@ SCRIPT_4_SCENES = (
 
 
 @pytest.mark.asyncio
+@patch("app.channels.resolve", AsyncMock(return_value=FINANCE))
 @patch("app.youtube._fetch_story_details")
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
@@ -60,6 +70,7 @@ async def test_generate_youtube_video_manual(
 
 
 @pytest.mark.asyncio
+@patch("app.channels.resolve", AsyncMock(return_value=FINANCE))
 @patch("app.youtube._fetch_story_details")
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
@@ -89,6 +100,7 @@ async def test_generate_youtube_video_auto_status(
 
 
 @pytest.mark.asyncio
+@patch("app.channels.resolve", AsyncMock(return_value=FINANCE))
 @patch("app.youtube._fetch_story_details")
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
@@ -125,6 +137,7 @@ async def test_generation_aborts_when_most_frames_are_placeholders(
 
 
 @pytest.mark.asyncio
+@patch("app.channels.resolve", AsyncMock(return_value=FINANCE))
 @patch("app.youtube._fetch_story_details")
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
@@ -159,6 +172,7 @@ async def test_generation_aborts_when_most_frames_are_silent(
 
 
 @pytest.mark.asyncio
+@patch("app.channels.resolve", AsyncMock(return_value=FINANCE))
 @patch("app.youtube._fetch_story_details")
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")
@@ -187,6 +201,7 @@ async def test_generation_aborts_when_script_generation_fails(
 
 
 @pytest.mark.asyncio
+@patch("app.channels.resolve", AsyncMock(return_value=FINANCE))
 @patch("app.youtube._fetch_story_details")
 @patch("app.youtube._record_youtube_draft")
 @patch("app.youtube._generate_script_for_story")

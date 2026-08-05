@@ -9,6 +9,7 @@ from typing import Any
 import structlog
 
 from app import db
+from app.channels import BASE_COMPLIANCE_RULES, Channel
 from app.settings import get_settings
 from app.storyboard import (
     Frame,
@@ -106,6 +107,9 @@ async def generate_youtube_video(
     """
     log.info("youtube_generation_started", story_id=str(story_id), channel_id=channel_id)
 
+    from app import channels
+    channel = await channels.resolve(channel_id)
+
     # 1. Fetch story details
     story = await _fetch_story_details(story_id)
     if not story:
@@ -119,7 +123,7 @@ async def generate_youtube_video(
     # 2. Scripting & Storyboard Generation
     await _stage(job_id, "script")
     try:
-        script_content = await _generate_script_for_story(story, channel_id)
+        script_content = await _generate_script_for_story(story, channel)
     except Exception as e:
         log.error("youtube_generation_aborted", reason="script_generation_failed", error=str(e))
         return None
@@ -255,48 +259,29 @@ async def _fetch_story_details(story_id: uuid.UUID) -> dict | None:
                 return {"headline": row["headline"]}
     return None
 
-async def _generate_script_for_story(story: dict, channel_id: str) -> str:
+async def _generate_script_for_story(story: dict, channel: Channel) -> str:
     """
-    Calls the LLM to generate the storyboard markdown.
-    Fetches the active voice profile from the database configuration.
+    Call the LLM to generate the storyboard markdown for one channel.
+
+    The channel supplies voice and prompt. Compliance rules come from
+    channels.BASE_COMPLIANCE_RULES and are not channel-overridable.
     """
     headline = story.get("headline", "Default Headline")
-    
-    # Fetch active voice profile and blocklist from DB config
-    import json
+
     import os
-    from app import db
     from google import genai
     from google.genai import types
-    
-    config_data = await db.get_config("voice_profiles")
-    
-    active_prompt = "Default AI voice prompt."
-    active_blocklist = []
-    preset_name = "default"
-    
-    if config_data:
-        try:
-            active_id = config_data.get("activeProfileId")
-            profiles = config_data.get("profiles", [])
-            active_profile = next((p for p in profiles if p.get("id") == active_id), profiles[0] if profiles else None)
-            
-            if active_profile:
-                active_prompt = active_profile.get("prompt", active_prompt)
-                active_blocklist = active_profile.get("blocklist", active_blocklist)
-                preset_name = active_profile.get("id", preset_name)
-        except Exception as e:
-            log.error("voice_profile_fetch_error", error=str(e))
-    
-    # Construct System Instructions
-    blocklist_str = ", ".join([f'"{word}"' for word in active_blocklist])
+
+    blocklist_str = ", ".join(f'"{word}"' for word in channel.effective_blocklist)
+
     system_instruction = f"""You are generating a script for a faceless YouTube explainer video.
-Your Voice & Personality: {active_prompt}
+Your Voice & Personality: {channel.script_prompt}
 
 COMPLIANCE RULES (CRITICAL):
-Do not provide financial advice. Do not recommend buying or selling any specific security or product.
-Explain what happened and why it's interesting — never what the reader should do.
+{BASE_COMPLIANCE_RULES}
 ABSOLUTELY FORBIDDEN WORDS: {blocklist_str}.
+These rules and forbidden words apply to the YAML frontmatter, including the
+title and description fields, exactly as they apply to the narration.
 
 FORMAT:
 You must output a valid markdown document that starts with YAML frontmatter.
@@ -304,7 +289,7 @@ Example format:
 ---
 title: "The video title"
 description: "A highly detailed, SEO-optimized description of the video. Write this as a human expert. NEVER mention or allude to AI, ChatGPT, or automated generation."
-preset: {preset_name}
+preset: {channel.voice_key}
 music: soft upbeat playful
 ---
 
@@ -317,8 +302,8 @@ Visual: "A bright, cute title card..."
 """
 
     user_prompt = f"Write a video script for the following story headline:\n{headline}"
-    
-    log.info("gemini_generation_started", preset=preset_name)
+
+    log.info("gemini_generation_started", channel_id=channel.id, preset=channel.voice_key)
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
