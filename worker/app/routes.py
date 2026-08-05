@@ -75,7 +75,7 @@ class YouTubeGenerateRequest(BaseModel):
 
 class YouTubeJobRequest(BaseModel):
     story_id: str
-    channel_id: str = "default"
+    channel_id: str = Field(min_length=1)
     upload_preference: str = "manual"
     mode: str | None = None
 
@@ -143,20 +143,31 @@ async def youtube_job_start(req: YouTubeJobRequest) -> dict:
     """
     import asyncio
 
+    from app import channels
+    from app.channels import ChannelConfigError
     from app.jobs import create_job, fail_job, finish_job
     from app.youtube import generate_youtube_video
 
     try:
-        sid = uuid.UUID(req.story_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="invalid story_id (must be a uuid)")
+        try:
+            sid = uuid.UUID(req.story_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid story_id (must be a uuid)")
 
-    try:
-        backend = backend_for_mode(req.mode)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        try:
+            backend = backend_for_mode(req.mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
-    job_id = await create_job(kind=req.mode or "short", story_id=sid)
+        # Resolved synchronously, same as /youtube/generate: a bad channel_id
+        # must fail the request, never a background task that already returned 202.
+        await channels.resolve(req.channel_id)
+
+        job_id = await create_job(kind=req.mode or "short", story_id=sid)
+    except HTTPException:
+        raise
+    except ChannelConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def run() -> None:
         try:
