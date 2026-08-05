@@ -10,6 +10,7 @@ Run once:  ..\\.venv\\Scripts\\python.exe -m scripts.seed_channels
 from __future__ import annotations
 
 import asyncio
+import sys
 
 from app import db
 from app.channels import BASE_BLOCKLIST, CONFIG_KEY
@@ -65,4 +66,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # psycopg's async pool cannot run on the ProactorEventLoop, Python's default
+    # on Windows, and times out after 30s with "Psycopg cannot use the
+    # 'ProactorEventLoop' to run in async mode". run_worker.py documents the same
+    # problem; an explicit loop_factory is what works.
+    loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
+    asyncio.run(main(), loop_factory=loop_factory)
