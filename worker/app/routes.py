@@ -253,13 +253,14 @@ async def get_stories() -> list[dict]:
 
 class ManualStoryRequest(BaseModel):
     headline: str
+    channel_id: str = Field(min_length=1)
 
 
 @router.post("/stories/manual")
 async def create_manual_story_endpoint(req: ManualStoryRequest) -> dict:
     """Create a manual story idea."""
     from app.db import create_manual_story
-    story_id = await create_manual_story(req.headline)
+    story_id = await create_manual_story(req.headline, req.channel_id)
     return {"id": str(story_id)}
 
 

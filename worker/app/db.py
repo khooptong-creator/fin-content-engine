@@ -340,14 +340,15 @@ async def create_or_join_story(
     return story_id
 
 
-async def create_manual_story(headline: str) -> uuid.UUID:
-    """Create a manual story without items for the autopilot."""
+async def create_manual_story(headline: str, channel_id: str) -> uuid.UUID:
+    """Create a manual story for one channel, without items, for the autopilot."""
     pool = await get_pool()
     async with pool.connection() as conn:
         row = await _fetchone(
             conn,
-            "INSERT INTO stories (headline, status) VALUES (%s, 'inbox') RETURNING id",
+            "INSERT INTO stories (headline, status, channel_id) VALUES (%s, 'inbox', %s) RETURNING id",
             headline,
+            channel_id,
         )
         return row["id"]
 
