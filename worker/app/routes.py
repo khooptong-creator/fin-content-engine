@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db import ping as db_ping, stats as db_stats
 
@@ -69,7 +69,7 @@ async def ingest_trigger(source_id: str) -> dict:
 
 class YouTubeGenerateRequest(BaseModel):
     story_id: str
-    channel_id: str
+    channel_id: str = Field(min_length=1)
     upload_preference: str = "manual"
 
 
@@ -106,13 +106,14 @@ class YouTubePublishRequest(BaseModel):
 async def youtube_generate(req: YouTubeGenerateRequest) -> dict:
     """Trigger YouTube video generation for a given story."""
     import traceback
+    from app.channels import ChannelConfigError
     from app.youtube import generate_youtube_video
     try:
         try:
             sid = uuid.UUID(req.story_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid story_id (must be a uuid)")
-            
+
         draft_id = await generate_youtube_video(
             story_id=sid,
             channel_id=req.channel_id,
@@ -120,8 +121,12 @@ async def youtube_generate(req: YouTubeGenerateRequest) -> dict:
         )
         if draft_id is None:
             raise HTTPException(status_code=404, detail="story not found")
-            
+
         return {"draft_id": str(draft_id)}
+    except HTTPException:
+        raise
+    except ChannelConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         print(f"Error in youtube_generate: {e}")
         traceback.print_exc()
