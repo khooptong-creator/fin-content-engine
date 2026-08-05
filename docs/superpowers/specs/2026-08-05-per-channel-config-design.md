@@ -2,24 +2,28 @@
 
 **Date:** 2026-08-05
 **Status:** Approved, awaiting implementation plan
-**Scope:** The channel mechanism only. Kids topic backlog and kids rendering are separate specs.
+**Scope:** Per-channel script generation config. Uploads are manual and out of scope.
 
 ## Problem
 
-The engine assumes one YouTube channel. Two accounts are now needed: a finance
-channel on the owner's personal account, and a kids channel on a second account.
+The engine assumes one YouTube channel. Two are now needed: a finance channel and
+a kids channel, published to separate accounts.
 
-Three concrete blockers exist today:
+Uploads are performed **manually** by the owner. This spec therefore covers only
+what determines the *generated output*, not publishing.
 
-| # | Location | Problem |
-|---|---|---|
-| 1 | `youtube.py:45` `_get_youtube_credentials()` | Loads a single token file from `settings.youtube_token_path`. No channel argument. |
-| 2 | `youtube.py:258` `_generate_script_for_story()` | Accepts `channel_id` and never reads it. The script comes from whichever `voice_profiles` entry is globally active, so two channels cannot run concurrently. |
-| 3 | `youtube.py:896` | `"selfDeclaredMadeForKids": False` is hardcoded. A kids channel publishing under this flag is a COPPA misdeclaration on every upload. |
+The blocker:
 
-A fourth, softer issue: the compliance block in the script system prompt is
-hardcoded finance language (`"Do not provide financial advice"`, a blocklist of
-`buy`/`sell`/`multibagger`) applied to every script regardless of channel.
+`youtube.py:258` `_generate_script_for_story()` accepts `channel_id` and never
+reads it. The script comes from whichever `voice_profiles` entry is globally
+active, so the two channels cannot be worked on concurrently. Switching brands
+means flipping a global setting in the GUI, and nothing catches a story generated
+under the wrong one.
+
+A second issue: the compliance block in the script system prompt is hardcoded
+inline. It is correct, and it must keep applying, but it currently sits in a
+string literal alongside per-channel content with no guarantee it survives a
+refactor or a config edit.
 
 `channel_id` is already threaded from `routes.py:72` through
 `generate_youtube_video` to `_record_youtube_draft`, which stores it in the draft
@@ -29,11 +33,35 @@ body. The plumbing exists. Only the resolution step is missing.
 
 | # | Decision | Rationale |
 |---|---|---|
-| 1 | Channels are a fixed pair in the `config` table, not a new table | Two channels. A `channels` table plus CRUD endpoints buys generality nothing currently needs. The `config` table is already GUI-editable. |
-| 2 | Resolution returns a validated frozen object, not a raw dict | Matches `settings.py`, which validates env into a typed object rather than reading vars ad hoc. Puts the guard in one testable place instead of four call sites. |
-| 3 | Fail loud on any missing channel config | The cost of guessing is a toddler video on the finance account, or a kids video misdeclared under COPPA. Both are worse than a failed job. Consistent with `MIN_SCRIPT_FRAMES` and with script generation raising rather than stubbing. |
+| 1 | Channels are a fixed pair in the `config` table, not a new table | Two channels. A `channels` table plus CRUD buys generality nothing needs. The `config` table is already GUI-editable. |
+| 2 | Resolution returns a validated frozen object, not a raw dict | Matches `settings.py`, which validates env into a typed object. Puts the guard in one testable place instead of several call sites. |
+| 3 | Fail loud on any missing channel config | The cost of guessing is a toddler script generated in the finance voice, or finance content in a toddler voice. Consistent with `MIN_SCRIPT_FRAMES` and with script generation raising rather than stubbing. |
 | 4 | Historical drafts keep their stored `channel_id` verbatim | Existing rows carry `"default"`. Rewriting them to `finance` would fabricate a fact about what was published. They display as *unassigned*. |
 | 5 | The `activeProfileId` code path is deleted, not left as a fallback | A retained fallback is a silent wrong-brand path. Values are copied forward first, so no data is lost. |
+| 6 | Uploads stay manual; no per-channel OAuth | Owner uploads to each account by hand. Removes per-channel token files, the `made_for_kids` API field, and the whole credential surface from this spec. |
+| 7 | **Compliance rules and the base blocklist are code constants, not config** | They must always hold. In config they are one careless GUI edit away from being removed, and that edit leaves no trace. In code they are covered by a test. Channels may *add* terms, never remove them. |
+
+## Compliance floor
+
+Defined in code, applied to every channel unconditionally:
+
+```python
+BASE_COMPLIANCE_RULES = (
+    "Do not provide financial advice. "
+    "Do not recommend buying or selling any specific security or product. "
+    "Explain what happened and why it is interesting, never what the viewer should do."
+)
+
+BASE_BLOCKLIST = ("buy", "sell", "accumulate", "target price", "multibagger", "sure shot")
+```
+
+A channel's effective blocklist is `BASE_BLOCKLIST | channel.extra_blocklist`.
+Union, so removal is impossible by construction rather than by validation. There
+is no config path, GUI control, or environment variable that disables either
+constant.
+
+This applies to the kids channel too. It costs nothing there and means no channel
+can ever be created that lacks the floor.
 
 ## Data model
 
@@ -43,19 +71,15 @@ New `channels` key in the `config` table:
 {
   "finance": {
     "display_name": "Finance",
-    "youtube_token_file": "token.finance.json",
     "voice_key": "adult_male",
-    "script_prompt": "...",
-    "blocklist": ["buy", "sell", "accumulate", "target price", "multibagger", "sure shot"],
-    "made_for_kids": false
+    "script_prompt": "You are a casual, humorous, and informative adult male...",
+    "extra_blocklist": []
   },
   "kids": {
     "display_name": "Kids",
-    "youtube_token_file": "token.kids.json",
     "voice_key": "baby",
-    "script_prompt": "...",
-    "blocklist": [],
-    "made_for_kids": true
+    "script_prompt": "You are a humorous, highly intelligent baby...",
+    "extra_blocklist": []
   }
 }
 ```
@@ -73,30 +97,26 @@ channel, recorded here so it is not rediscovered later.
 
 | Unit | Responsibility | Depends on |
 |---|---|---|
-| `worker/app/channels.py` (new) | `Channel` frozen dataclass, `async resolve(channel_id) -> Channel`, `ChannelConfigError`. The only interpreter of channel config. | `db.get_config`, `VOICE_MAP` |
-| `_get_youtube_credentials(scopes, channel)` | Reads `channel.youtube_token_file` under `settings.youtube_token_dir`. | `channels.Channel` |
-| `_generate_script_for_story(story, channel)` | Uses `channel.script_prompt` and `channel.blocklist`. `activeProfileId` lookup removed. | `channels.Channel` |
-| Upload call (`youtube.py` ~:896) | Sets `selfDeclaredMadeForKids` from `channel.made_for_kids`. | `channels.Channel` |
+| `worker/app/channels.py` (new) | `Channel` frozen dataclass, `async resolve(channel_id) -> Channel`, `ChannelConfigError`, `BASE_COMPLIANCE_RULES`, `BASE_BLOCKLIST`. The only interpreter of channel config. | `db.get_config`, `VOICE_MAP` |
+| `_generate_script_for_story(story, channel)` | Uses `channel.script_prompt` and `channel.effective_blocklist`. Compliance rules come from the constant. `activeProfileId` lookup removed. | `channels.Channel` |
 | `routes.py` | `channel_id` loses its `"default"` value; becomes required. Maps `ChannelConfigError` to HTTP 400. | `channels.resolve` |
-| `settings.py` | `youtube_token_path` becomes `youtube_token_dir`. | — |
-| `gui/src/app/settings` | Channel selector; prompt and blocklist fields edit the selected channel. | `/config/channels` |
+| `gui/src/app/settings` | Channel selector; prompt and extra-blocklist fields edit the selected channel. Base blocklist shown read-only. | `/config/channels` |
 
 The config API needs no change: `routes.py:277` already exposes a generic
 `GET/PUT /config/{key}`, so `/config/channels` works as soon as the key exists.
 
-`Channel` validates at construction: all fields present and non-empty,
-`voice_key` in `VOICE_MAP`, token file exists on disk. A partially populated
-`Channel` cannot be constructed.
+`Channel` validates at construction: all fields present and non-empty, and
+`voice_key` in `VOICE_MAP`. A partially populated `Channel` cannot be built.
 
 ## Data flow
 
 ```
 POST /youtube/generate {story_id, channel_id}
-  -> channels.resolve(channel_id) -> Channel        (fails here or not at all)
-  -> _generate_script_for_story(story, channel)     (channel prompt + blocklist)
-  -> frames -> render
-  -> upload(channel)                                (channel token + made_for_kids)
+  -> channels.resolve(channel_id) -> Channel     (fails here or not at all)
+  -> _generate_script_for_story(story, channel)  (channel prompt + base rules + union blocklist)
+  -> frames -> render -> final MP4 on disk
   -> _record_youtube_draft(channel_id)
+  -> owner uploads manually
 ```
 
 The `Channel` is resolved once at the top of `generate_youtube_video` and passed
@@ -105,9 +125,9 @@ down. Nothing downstream re-reads config.
 ## Error handling
 
 No fallbacks in this path. `ChannelConfigError` is raised for: unknown
-`channel_id`, absent `channels` config key, any missing or empty field, a
-`voice_key` not in `VOICE_MAP`, and a token file that does not exist. The message
-names the offending field. `routes.py` returns 400 and no job is created.
+`channel_id`, absent `channels` config key, any missing or empty field, and a
+`voice_key` not in `VOICE_MAP`. The message names the offending field.
+`routes.py` returns 400 and no job is created.
 
 ## Testing
 
@@ -115,16 +135,18 @@ Tests must not touch the network; patch `_build_frames`, not a backend.
 
 | Test | Asserts |
 |---|---|
-| `Channel` construction | Rejects each missing or empty field, unknown `voice_key`, absent token file. Pure unit, no DB. |
+| `Channel` construction | Rejects each missing or empty field and an unknown `voice_key`. Pure unit, no DB. |
 | `resolve()` | With `db.get_config` patched: returns the right channel, raises on unknown id. |
 | Generate without `channel_id` | Request rejected, no job created. |
-| Upload payload | `selfDeclaredMadeForKids` equals the channel's flag. This is the COPPA regression guard. |
-| Two channels | Each resolves to a different token file and prompt. |
+| **Compliance floor** | A channel whose `extra_blocklist` omits base terms still yields all base terms in `effective_blocklist`. A channel cannot suppress a base term. |
+| **Compliance in prompt** | The generated system instruction contains `BASE_COMPLIANCE_RULES` verbatim for every channel, including kids. |
+| Two channels | Each resolves to a different prompt and voice key. |
 
 ## Migration
 
 1. Read the currently active `voice_profiles` profile.
-2. Write it into `channels.finance`, preserving prompt and blocklist.
+2. Write it into `channels.finance`, preserving the prompt. Terms already in
+   `BASE_BLOCKLIST` are not duplicated into `extra_blocklist`.
 3. Add `stories.channel_id`.
 4. Delete the `activeProfileId` read path from `_generate_script_for_story`.
 
@@ -132,13 +154,21 @@ Step 4 removes a **code path**, not data. The `voice_profiles` config row stays
 in the database untouched after its values are copied forward. Existing draft
 rows are not modified.
 
-## Operational prerequisite
+## Manual upload, and what moves to the owner
 
-The OAuth flow must be run once per Google account, producing
-`token.finance.json` and `token.kids.json` in `youtube_token_dir`. The kids token
-is only needed when that channel goes live.
+Because uploads are manual, the `selfDeclaredMadeForKids` designation is no
+longer set by this system. **It becomes the owner's responsibility to mark kids
+videos as "Made for kids" in YouTube Studio at upload time.** This is a COPPA
+obligation, not a preference.
+
+`youtube.py` retains a `/youtube/publish` path with `selfDeclaredMadeForKids`
+hardcoded `False`, reachable from a button on the drafts page. It is now dormant
+but not disabled. Recommendation, small and outside this spec's core: gate it
+behind `FCE_PUBLISH_ENABLED`, defaulting off, so an unused path cannot publish a
+kids video under a false designation by accident.
 
 ## Out of scope
 
-Kids topic backlog, kids rendering approach, 3D animation research. The kids
-channel cannot publish until its rendering path is decided in a separate spec.
+Per-channel OAuth and automated upload. Kids topic backlog, kids rendering
+approach, 3D animation research. The kids channel cannot produce video until its
+rendering path is decided in a separate spec.
