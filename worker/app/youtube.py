@@ -230,20 +230,26 @@ async def generate_youtube_video(
         raise
 
     mp4_path = video_dir / "renders" / "video.mp4"
-    
+
+    frontmatter = _parse_storyboard_frontmatter(video_dir / "STORYBOARD.md")
+    title, description = _require_metadata(frontmatter)
+    _write_upload_txt(video_dir, channel, title, description)
+
     # 4. Local Draft Registration
     # User requested all output videos to be stored locally and NOT pushed to VPS/Cloud.
     # "manual" means a human reviews in the dashboard first; "auto" tries to upload immediately.
     status = "pending" if upload_preference == "manual" else "published"
     external_id = None
-        
+
     draft_id = await _record_youtube_draft(
         story_id=story_id,
         channel_id=channel_id,
         upload_preference=upload_preference,
         file_path=str(mp4_path),
         status=status,
-        external_id=external_id
+        external_id=external_id,
+        title=title,
+        description=description,
     )
     
     log.info("youtube_generation_finished", draft_id=str(draft_id))
@@ -349,7 +355,16 @@ Visual: "A bright, cute title card..."
     log.error("gemini_generation_failed", attempts=attempt, error=str(last_error))
     raise RuntimeError(f"script generation failed after {attempt} attempts: {last_error}")
 
-async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_preference: str, file_path: str, status: str, external_id: str | None) -> uuid.UUID | None:
+async def _record_youtube_draft(
+    story_id: uuid.UUID,
+    channel_id: str,
+    upload_preference: str,
+    file_path: str,
+    status: str,
+    external_id: str | None,
+    title: str,
+    description: str,
+) -> uuid.UUID | None:
     pool = await db.get_pool()
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
@@ -370,7 +385,9 @@ async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_pre
                     db._dumps({
                         "file_path": file_path,
                         "channel_id": channel_id,
-                        "upload_preference": upload_preference
+                        "upload_preference": upload_preference,
+                        "title": title,
+                        "description": description,
                     }),
                     status,
                     db._dumps({"youtube": external_id}) if external_id else None,
@@ -1040,6 +1057,61 @@ async def get_youtube_analytics(video_ids: list[str]) -> dict:
     except Exception as e:
         log.error("youtube_analytics_fetch_failed", error=str(e))
         return {}
+
+
+def _require_metadata(frontmatter: dict[str, str]) -> tuple[str, str]:
+    """Return (title, description) or raise.
+
+    The old publish path read `frontmatter.get("description") or title`, so a
+    generation that produced no description silently yielded a one-line title in
+    the description box. That fallback is gone: an empty field is a generation
+    failure and should be visible.
+    """
+    title = (frontmatter.get("title") or "").strip()
+    description = (frontmatter.get("description") or "").strip()
+
+    missing = [n for n, v in (("title", title), ("description", description)) if not v]
+    if missing:
+        raise ValueError(
+            f"storyboard frontmatter is missing: {', '.join(missing)}"
+        )
+
+    return title, description
+
+
+def _write_upload_txt(
+    video_dir: Path, channel: Channel, title: str, description: str
+) -> Path:
+    """Write the paste-ready metadata beside the storyboard.
+
+    Uploads are manual, so this file is how the metadata reaches YouTube. It also
+    means the metadata survives a database reset and travels with the folder.
+    """
+    lines = [
+        f"CHANNEL: {channel.display_name}",
+        "",
+        "TITLE",
+        "-----",
+        title,
+        "",
+        "DESCRIPTION",
+        "-----------",
+        description,
+        "",
+    ]
+
+    if channel.id == "kids":
+        lines += [
+            "REMINDER",
+            "--------",
+            "Tick \"Made for kids\" in YouTube Studio before publishing. This is a",
+            "COPPA requirement and nothing in this pipeline sets it for you.",
+            "",
+        ]
+
+    path = video_dir / "upload.txt"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
 
 
 def _parse_storyboard_frontmatter(storyboard_path: Path) -> dict[str, str]:

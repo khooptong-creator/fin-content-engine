@@ -24,7 +24,7 @@ FINANCE = Channel(
 # script the length guard accepts, otherwise they abort before reaching the
 # behaviour under test.
 SCRIPT_4_SCENES = (
-    "---\ntitle: Test\npreset: daisy-days\n---\n\n"
+    "---\ntitle: Test\ndescription: A test description.\npreset: daisy-days\n---\n\n"
     "# Scene 1\nVoiceover: A\n\n"
     "# Scene 2\nVoiceover: B\n\n"
     "# Scene 3\nVoiceover: C\n\n"
