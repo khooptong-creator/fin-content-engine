@@ -112,3 +112,44 @@ async def test_generation_writes_upload_txt_and_records_metadata(
     kwargs = mock_record.call_args.kwargs
     assert kwargs["title"] == "Real Title"
     assert kwargs["description"] == "A real SEO description."
+
+
+@pytest.mark.asyncio
+@patch("app.youtube._fetch_story_details")
+@patch("app.youtube._record_youtube_draft")
+@patch("app.youtube._generate_script_for_story")
+@patch("app.youtube._generate_frame_audio")
+@patch("app.youtube._build_frames")
+@patch("app.youtube.subprocess.run")
+async def test_bad_metadata_aborts_before_render(
+    mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
+):
+    """Empty description must abort before the render subprocess runs.
+
+    If validation regresses to after the render (its old position), this
+    assertion on mock_run is the one that would catch it.
+    """
+    from app import youtube
+
+    story_id = uuid.uuid4()
+    mock_fetch.return_value = {"headline": "Test Story"}
+    mock_script.return_value = (
+        "---\ntitle: Real Title\npreset: adult_male\n---\n\n"
+        "# Scene 1\nVoiceover: A\n\n# Scene 2\nVoiceover: B\n\n"
+        "# Scene 3\nVoiceover: C\n\n# Scene 4\nVoiceover: D\n"
+    )
+    mock_run.return_value = MagicMock(stdout="mocked")
+    mock_audio.return_value = []
+    mock_frames.return_value = []
+
+    with patch("app.youtube.VIDEOS_DIR", tmp_path), patch(
+        "app.channels.resolve", AsyncMock(return_value=FINANCE)
+    ):
+        with pytest.raises(ValueError, match="description"):
+            await youtube.generate_youtube_video(
+                story_id=story_id, channel_id="finance", upload_preference="manual"
+            )
+
+    mock_run.assert_not_called()
+    mock_frames.assert_not_called()
+    assert not (tmp_path / f"story-{story_id}" / "upload.txt").exists()

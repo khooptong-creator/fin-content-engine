@@ -129,7 +129,13 @@ async def generate_youtube_video(
         return None
     storyboard_path = video_dir / "STORYBOARD.md"
     storyboard_path.write_text(script_content, encoding="utf-8")
-    
+
+    # Validate upload metadata before any frame building or rendering. A script
+    # with a missing/empty title or description must abort here, not after
+    # burning the entire HyperFrames/ffmpeg render.
+    frontmatter = _parse_storyboard_frontmatter(storyboard_path)
+    title, description = _require_metadata(frontmatter)
+
     # 3. Storyboard compilation (voice first, visuals second)
     #
     # Narration is generated per frame so each frame's on-screen duration can be
@@ -231,8 +237,6 @@ async def generate_youtube_video(
 
     mp4_path = video_dir / "renders" / "video.mp4"
 
-    frontmatter = _parse_storyboard_frontmatter(video_dir / "STORYBOARD.md")
-    title, description = _require_metadata(frontmatter)
     _write_upload_txt(video_dir, channel, title, description)
 
     # 4. Local Draft Registration

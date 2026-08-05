@@ -213,7 +213,7 @@ async def test_generation_aborts_when_script_is_too_short(
     """The placeholder and silence guards are ratios, so a one-frame script
     scores perfectly on both. Length has to be checked on its own."""
     mock_fetch.return_value = {"headline": "Test Story"}
-    mock_script.return_value = "---\ntitle: Test\n---\n\n# Scene 1\nVoiceover: Hello\n"
+    mock_script.return_value = "---\ntitle: Test\ndescription: A test description.\n---\n\n# Scene 1\nVoiceover: Hello\n"
 
     with patch("app.youtube.VIDEOS_DIR", tmp_path):
         draft_id = await generate_youtube_video(
