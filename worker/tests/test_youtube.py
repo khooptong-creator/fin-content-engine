@@ -7,7 +7,6 @@ import pytest
 from app.channels import Channel
 from app.youtube import (
     generate_youtube_video,
-    publish_youtube_draft,
     _get_youtube_credentials,
     _parse_storyboard_frontmatter,
 )
@@ -40,8 +39,9 @@ SCRIPT_4_SCENES = (
 @patch("app.youtube._generate_frame_audio")
 @patch("app.youtube._build_frames")
 @patch("app.youtube.subprocess.run")
+@patch("app.youtube._generate_thumbnail")
 async def test_generate_youtube_video_manual(
-    mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
+    mock_thumb, mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
 ):
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
@@ -77,8 +77,9 @@ async def test_generate_youtube_video_manual(
 @patch("app.youtube._generate_frame_audio")
 @patch("app.youtube._build_frames")
 @patch("app.youtube.subprocess.run")
+@patch("app.youtube._generate_thumbnail")
 async def test_generate_youtube_video_auto_status(
-    mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
+    mock_thumb, mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
 ):
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
@@ -226,50 +227,6 @@ async def test_generation_aborts_when_script_is_too_short(
     mock_record.assert_not_called()
     mock_audio.assert_not_called()
     mock_frames.assert_not_called()
-
-
-@pytest.mark.asyncio
-@patch("app.youtube._upload_to_youtube")
-@patch("app.youtube._upload_thumbnail")
-@patch("app.youtube.db.get_draft")
-@patch("app.youtube.db.update_draft_published")
-async def test_publish_youtube_draft_success(
-    mock_update, mock_get_draft, mock_upload_thumb, mock_upload_video, tmp_path
-):
-    draft_id = uuid.uuid4()
-    story_id = uuid.uuid4()
-    video_dir = tmp_path / f"story-{story_id}" / "renders"
-    video_dir.mkdir(parents=True)
-    video_path = video_dir / "video.mp4"
-    video_path.write_bytes(b"fake mp4")
-    thumb_path = video_dir / "thumbnail.jpg"
-    thumb_path.write_bytes(b"fake thumb")
-    storyboard_path = video_dir.parent / "STORYBOARD.md"
-    storyboard_path.write_text(
-        "---\ntitle: My Title\ndescription: My Description\n---\n\n# Scene 1\nVoiceover: Hello\n"
-    )
-
-    mock_get_draft.return_value = {
-        "id": str(draft_id),
-        "story_id": str(story_id),
-        "headline": "My Headline",
-        "platform": "youtube",
-        "body": {"file_path": str(video_path)},
-        "status": "pending",
-    }
-    mock_upload_video.return_value = "abc123"
-
-    result = await publish_youtube_draft(draft_id)
-
-    assert result["video_id"] == "abc123"
-    assert result["url"] == "https://youtube.com/watch?v=abc123"
-    mock_upload_video.assert_called_once_with(str(video_path), "My Title", "My Description")
-    mock_upload_thumb.assert_called_once_with("abc123", str(thumb_path))
-    mock_update.assert_called_once_with(
-        draft_id,
-        status="published",
-        published_ids={"youtube": "abc123"},
-    )
 
 
 def test_parse_storyboard_frontmatter():

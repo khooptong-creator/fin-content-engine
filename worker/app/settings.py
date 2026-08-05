@@ -46,7 +46,6 @@ class Settings(BaseSettings):
 
     # --- YouTube Data API (Phase 4) ---
     youtube_token_path: Path = Path("token.json")
-    youtube_client_secrets_path: Path = Path("client_secret.json")
     youtube_channel_id: str = ""
 
     # --- Test/dev only ---

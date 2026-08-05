@@ -98,9 +98,6 @@ def backend_for_mode(mode: str | None) -> str | None:
     return MODE_BACKENDS[mode]
 
 
-class YouTubePublishRequest(BaseModel):
-    draft_id: str
-
 
 @router.post("/youtube/generate")
 async def youtube_generate(req: YouTubeGenerateRequest) -> dict:
@@ -214,34 +211,6 @@ async def youtube_job_status(job_id: str) -> dict:
     }
 
 
-@router.post("/youtube/publish")
-async def youtube_publish(req: YouTubePublishRequest) -> dict:
-    """Publish a rendered YouTube draft to a channel."""
-    from app.youtube import publish_youtube_draft
-
-    try:
-        try:
-            did = uuid.UUID(req.draft_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid draft_id (must be a uuid)")
-
-        result = await publish_youtube_draft(did)
-        return result
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        # OAuth credentials missing / invalid.
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        print(f"Error in youtube_publish: {e}")
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stories")

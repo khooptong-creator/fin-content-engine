@@ -239,6 +239,10 @@ async def generate_youtube_video(
 
     _write_upload_txt(video_dir, channel, title, description)
 
+    thumbnail_path = video_dir / "thumbnail.jpg"
+    if not thumbnail_path.exists():
+        await _generate_thumbnail(title, str(thumbnail_path))
+
     # 4. Local Draft Registration
     # User requested all output videos to be stored locally and NOT pushed to VPS/Cloud.
     # "manual" means a human reviews in the dashboard first; "auto" tries to upload immediately.
@@ -877,49 +881,6 @@ async def _generate_audio_for_script(script_content: str, output_path: Path):
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", str(output_path)
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-async def _upload_to_youtube(video_path: str, title: str, description: str) -> str:
-    """
-    Uploads a video to YouTube Data API v3. 
-    Runs the blocking Google API client in a threadpool.
-    """
-    from starlette.concurrency import run_in_threadpool
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    
-    def _do_upload():
-        creds = _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
-        youtube = build("youtube", "v3", credentials=creds)
-        
-        body = {
-            "snippet": {
-                "title": title[:100],  # Max 100 chars
-                "description": description[:5000],  # Max 5000 chars
-                "tags": ["finance", "explainer", "shorts"],
-                "categoryId": "27"  # Education
-            },
-            "status": {
-                "privacyStatus": "private",  # Upload as draft
-                "selfDeclaredMadeForKids": False
-            }
-        }
-        
-        media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
-        request = youtube.videos().insert(
-            part=",".join(body.keys()),
-            body=body,
-            media_body=media
-        )
-        
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status:
-                log.info("youtube_upload_progress", progress=int(status.progress() * 100))
-        
-        return response["id"]
-        
-    return await run_in_threadpool(_do_upload)
-
 async def _generate_thumbnail(title: str, output_path: str):
     """
     Generates a thumbnail using a minimal HTML template and Playwright.
@@ -1000,24 +961,6 @@ async def _generate_thumbnail(title: str, output_path: str):
                 pass
                 
     await run_in_threadpool(_run)
-
-async def _upload_thumbnail(video_id: str, thumbnail_path: str):
-    """
-    Uploads a custom thumbnail for the given YouTube video ID.
-    """
-    from starlette.concurrency import run_in_threadpool
-    from googleapiclient.discovery import build
-    
-    def _do_upload():
-        creds = _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
-        youtube = build("youtube", "v3", credentials=creds)
-        request = youtube.thumbnails().set(
-            videoId=video_id,
-            media_body=thumbnail_path
-        )
-        request.execute()
-        
-    return await run_in_threadpool(_do_upload)
 
 async def get_youtube_analytics(video_ids: list[str]) -> dict:
     """
@@ -1135,52 +1078,3 @@ def _parse_storyboard_frontmatter(storyboard_path: Path) -> dict[str, str]:
         except Exception:
             pass
     return frontmatter
-
-
-async def publish_youtube_draft(draft_id: uuid.UUID) -> dict[str, str]:
-    """
-    Publish a pending YouTube draft: upload the rendered MP4, attach a thumbnail,
-    and update the draft record. Returns {video_id, url}.
-    """
-    log.info("youtube_publish_started", draft_id=str(draft_id))
-
-    draft = await db.get_draft(draft_id)
-    if not draft:
-        raise ValueError(f"Draft {draft_id} not found")
-    if draft.get("platform") != "youtube":
-        raise ValueError(f"Draft {draft_id} is not a YouTube draft")
-
-    body = draft.get("body") or {}
-    file_path = body.get("file_path")
-    if not file_path:
-        raise ValueError(f"Draft {draft_id} has no file_path")
-
-    video_path = Path(file_path)
-    if not video_path.exists():
-        raise FileNotFoundError(f"Rendered video not found: {video_path}")
-
-    # Prefer an already-rendered thumbnail; fall back to generating one.
-    thumbnail_path = video_path.parent / "thumbnail.jpg"
-    if not thumbnail_path.exists():
-        thumbnail_path = video_path.parent / "thumbnail.png"
-    if not thumbnail_path.exists():
-        thumbnail_path = video_path.parent / "thumbnail.jpg"
-        await _generate_thumbnail(draft.get("headline", "Video"), str(thumbnail_path))
-
-    storyboard_path = video_path.parent.parent / "STORYBOARD.md"
-    frontmatter = _parse_storyboard_frontmatter(storyboard_path)
-
-    title = frontmatter.get("title") or draft.get("headline") or "Untitled Video"
-    description = frontmatter.get("description") or title
-
-    video_id = await _upload_to_youtube(str(video_path), title, description)
-    await _upload_thumbnail(video_id, str(thumbnail_path))
-
-    await db.update_draft_published(
-        draft_id,
-        status="published",
-        published_ids={"youtube": video_id},
-    )
-
-    log.info("youtube_publish_finished", draft_id=str(draft_id), video_id=video_id)
-    return {"video_id": video_id, "url": f"https://youtube.com/watch?v={video_id}"}
