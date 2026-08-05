@@ -38,6 +38,10 @@ supabase/functions/embed/node_modules/
 # Stray artifact from earlier shell invocation
 nul
 
+# Vendored third-party tool, not part of this repo. Its config.toml holds live
+# DeepSeek + Pexels API keys in plaintext — never track this tree.
+MoneyPrinterTurbo/
+
 # Unrelated pre-existing files (local briefs / prompts)
 PROMPT.txt
 Content Creation Project folder con.txt
