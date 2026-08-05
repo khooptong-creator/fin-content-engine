@@ -585,9 +585,11 @@ async def get_drafts() -> list[dict[str, Any]]:
         drafts = await _fetchall(
             conn,
             """
-            SELECT d.id, d.story_id, s.headline, d.platform, d.format, 
-                   d.body->>'channel_id' AS channel_id, 
-                   d.body->>'upload_preference' AS upload_preference, 
+            SELECT d.id, d.story_id, s.headline, d.platform, d.format,
+                   d.body->>'channel_id' AS channel_id,
+                   d.body->>'upload_preference' AS upload_preference,
+                   d.body->>'title' AS title,
+                   d.body->>'description' AS description,
                    d.body, d.status, d.created_at, d.published_ids
             FROM drafts d
             JOIN stories s ON d.story_id = s.id
@@ -607,6 +609,8 @@ async def get_draft(draft_id: uuid.UUID) -> dict[str, Any] | None:
             SELECT d.id, d.story_id, s.headline, d.platform, d.format,
                    d.body->>'channel_id' AS channel_id,
                    d.body->>'upload_preference' AS upload_preference,
+                   d.body->>'title' AS title,
+                   d.body->>'description' AS description,
                    d.body, d.status, d.created_at, d.published_ids
             FROM drafts d
             JOIN stories s ON d.story_id = s.id
