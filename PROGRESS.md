@@ -14,7 +14,7 @@
 | **P1 — Spine + Reader** | ✅ **DEPLOYED** | Worker live on VPS, live ingest verified (50 items), public HTTPS pending final curl. See `docs/P1-HANDOFF.md`. |
 | **P2 — Brain + Gate** | ⬜ Not started | handoff prompt in blueprint §10 |
 | **P2.5 — Newsletter + Funnel** | ⬜ Not started | |
-| **P3 — Cockpit (GUI)** | ⬜ Not started | Next.js (provisional) |
+| **P3 — Cockpit (GUI)** | 🟡 Built, unverified | Next.js in `gui/`. Pages: dashboard, `drafts`, `films`, `settings`, `docs`. Calls worker on `127.0.0.1:8000` (`/stories`, `/youtube/generate`, `/youtube/publish`, `/youtube/jobs`, `/config/voice_profiles`). Not yet run end-to-end against a live worker. |
 | **P4 — Publishers** | ⬜ Not started | |
 | **P5 — Reply engine** | ⬜ Not started | |
 | **P6 — Analytics & hardening** | ⬜ Not started | |

@@ -1,9 +1,44 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, Loader2, PlayCircle, Settings2, Share2, Video, FileText, PlaySquare, Download } from "lucide-react";
+import { Loader2, PlayCircle, Settings2, Video, FileText, PlaySquare, Download } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "unavailable">("idle");
+
+  async function copy() {
+    if (!navigator.clipboard) {
+      setCopyState("unavailable");
+      setTimeout(() => setCopyState("idle"), 1500);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyState("copied");
+    } catch {
+      setCopyState("unavailable");
+    }
+    setTimeout(() => setCopyState("idle"), 1500);
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-black text-foreground/40 uppercase tracking-[0.2em]">{label}</span>
+        <button
+          onClick={copy}
+          disabled={!value}
+          className="text-xs rounded-lg border border-foreground/10 px-2 py-1 text-foreground/60 hover:text-foreground hover:border-foreground/20 transition-colors disabled:opacity-40"
+        >
+          {copyState === "copied" ? "Copied" : copyState === "unavailable" ? "Copy unavailable" : "Copy"}
+        </button>
+      </div>
+      <p className="whitespace-pre-wrap text-sm text-foreground/70">{value || "Not generated"}</p>
+    </div>
+  );
+}
 
 export default function DraftsPage() {
   const [drafts, setDrafts] = useState<any[]>([]);
@@ -59,35 +94,10 @@ export default function DraftsPage() {
 }
 
 function DraftCard({ draft }: { draft: any }) {
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [success, setSuccess] = useState(draft.status === "published");
-  const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishUrl, setPublishUrl] = useState<string | null>(null);
+  const success = draft.status === "published";
   const [activeTab, setActiveTab] = useState<"overview" | "youtube">("overview");
   const [markdownContent, setMarkdownContent] = useState<string | null>(null);
   const [loadingMarkdown, setLoadingMarkdown] = useState(false);
-
-  const handlePublish = async () => {
-    setIsPublishing(true);
-    setPublishError(null);
-    try {
-      const res = await fetch("/api/youtube/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draft_id: draft.id }),
-      });
-      const data = await res.json().catch(() => ({ detail: "Upload failed" }));
-      if (!res.ok) {
-        throw new Error(data.detail || `Upload failed (${res.status})`);
-      }
-      setSuccess(true);
-      setPublishUrl(data.url || `https://youtube.com/watch?v=${data.video_id}`);
-    } catch (err: any) {
-      setPublishError(err.message || "Upload failed");
-    } finally {
-      setIsPublishing(false);
-    }
-  };
 
   const loadMarkdown = async () => {
     if (markdownContent) return;
@@ -169,6 +179,11 @@ function DraftCard({ draft }: { draft: any }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12">
             {/* Draft Content (Left 2/3) */}
             <div className="md:col-span-2 space-y-6">
+              <div className="p-5 rounded-2xl bg-black/60 border border-border shadow-inner">
+                <CopyField label="Title" value={draft.title} />
+                <CopyField label="Description" value={draft.description} />
+              </div>
+
               <div>
                 <h3 className="text-xs font-black text-foreground/40 uppercase tracking-[0.2em] mb-3">Video Render Details</h3>
                 <div className="p-5 rounded-2xl bg-black/60 border border-border shadow-inner text-foreground/80 font-mono text-[13px] leading-relaxed space-y-3">
@@ -193,55 +208,11 @@ function DraftCard({ draft }: { draft: any }) {
                   <Video className="w-7 h-7" />
                 </div>
                 <div>
-                  <h4 className="text-foreground font-bold tracking-wide">Rendered Successfully</h4>
-                  <p className="text-[11px] text-foreground/50 mt-1 uppercase tracking-wider font-semibold">Ready for YouTube</p>
+                  <h4 className="text-foreground font-bold tracking-wide">{success ? "Published" : "Rendered Successfully"}</h4>
+                  <p className="text-[11px] text-foreground/50 mt-1 uppercase tracking-wider font-semibold">
+                    {success ? "Live" : "Copy the metadata above to publish manually"}
+                  </p>
                 </div>
-                
-                <button 
-                  onClick={handlePublish}
-                  disabled={isPublishing || success}
-                  className={`w-full mt-4 py-3.5 px-4 rounded-xl font-bold tracking-wide flex items-center justify-center space-x-2 transition-all duration-300 ${
-                    success 
-                      ? "bg-green-500/10 text-green-400 border border-green-500/20 shadow-none cursor-default" 
-                      : isPublishing 
-                        ? "bg-foreground/10 text-foreground/50 cursor-not-allowed border border-transparent"
-                        : "bg-primary text-white hover:bg-primary/90 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] hover:-translate-y-0.5"
-                  }`}
-                >
-                  {success ? (
-                    <>
-                      <Check className="w-5 h-5" />
-                      <span>Published Live</span>
-                    </>
-                  ) : isPublishing ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Uploading...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Share2 className="w-5 h-5" />
-                      <span>Publish to YouTube</span>
-                    </>
-                  )}
-                </button>
-
-                {publishError && (
-                  <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium">
-                    {publishError}
-                  </div>
-                )}
-
-                {success && publishUrl && (
-                  <a
-                    href={publishUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-4 block w-full py-3 px-4 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-sm font-bold text-center hover:bg-green-500/20 transition-colors"
-                  >
-                    Open on YouTube →
-                  </a>
-                )}
               </div>
             </div>
           </div>

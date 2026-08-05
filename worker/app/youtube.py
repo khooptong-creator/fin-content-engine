@@ -9,6 +9,7 @@ from typing import Any
 import structlog
 
 from app import db
+from app.channels import BASE_COMPLIANCE_RULES, Channel
 from app.settings import get_settings
 from app.storyboard import (
     Frame,
@@ -103,8 +104,15 @@ async def generate_youtube_video(
     `backend` selects the frame backend for this run only, so one worker can
     produce both formats without an env change or a restart; `FRAME_BACKEND`
     supplies the default. `job_id`, when given, receives stage progress.
+
+    `upload_preference` is recorded on the draft row for provenance only. It
+    once chose between "review first" and "upload now"; the publish path is
+    gone, so every generated draft is now recorded as pending regardless.
     """
     log.info("youtube_generation_started", story_id=str(story_id), channel_id=channel_id)
+
+    from app import channels
+    channel = await channels.resolve(channel_id)
 
     # 1. Fetch story details
     story = await _fetch_story_details(story_id)
@@ -119,13 +127,19 @@ async def generate_youtube_video(
     # 2. Scripting & Storyboard Generation
     await _stage(job_id, "script")
     try:
-        script_content = await _generate_script_for_story(story, channel_id)
+        script_content = await _generate_script_for_story(story, channel)
     except Exception as e:
         log.error("youtube_generation_aborted", reason="script_generation_failed", error=str(e))
         return None
     storyboard_path = video_dir / "STORYBOARD.md"
     storyboard_path.write_text(script_content, encoding="utf-8")
-    
+
+    # Validate upload metadata before any frame building or rendering. A script
+    # with a missing/empty title or description must abort here, not after
+    # burning the entire HyperFrames/ffmpeg render.
+    frontmatter = _parse_storyboard_frontmatter(storyboard_path)
+    title, description = _require_metadata(frontmatter)
+
     # 3. Storyboard compilation (voice first, visuals second)
     #
     # Narration is generated per frame so each frame's on-screen duration can be
@@ -226,20 +240,42 @@ async def generate_youtube_video(
         raise
 
     mp4_path = video_dir / "renders" / "video.mp4"
-    
+
+    _write_upload_txt(video_dir, channel, title, description)
+
+    thumbnail_path = video_dir / "thumbnail.jpg"
+    if not thumbnail_path.exists():
+        # A thumbnail is a convenience for the manual upload, nothing more. The
+        # MP4 is already on disk at this point, so letting a missing playwright
+        # install propagate would throw away a completed render and leave no
+        # draft row behind. Only this one call is guarded.
+        try:
+            await _generate_thumbnail(title, str(thumbnail_path))
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "thumbnail_generation_failed",
+                story_id=str(story_id),
+                error=str(exc),
+            )
+
     # 4. Local Draft Registration
     # User requested all output videos to be stored locally and NOT pushed to VPS/Cloud.
-    # "manual" means a human reviews in the dashboard first; "auto" tries to upload immediately.
-    status = "pending" if upload_preference == "manual" else "published"
+    # Nothing in this system publishes any more — uploads are performed by hand
+    # from the drafts page — so a newly generated draft is always "pending".
+    # `upload_preference` is still recorded on the draft row, but it no longer
+    # selects a publish behaviour; there is no publish path left for it to pick.
+    status = "pending"
     external_id = None
-        
+
     draft_id = await _record_youtube_draft(
         story_id=story_id,
         channel_id=channel_id,
         upload_preference=upload_preference,
         file_path=str(mp4_path),
         status=status,
-        external_id=external_id
+        external_id=external_id,
+        title=title,
+        description=description,
     )
     
     log.info("youtube_generation_finished", draft_id=str(draft_id))
@@ -255,48 +291,29 @@ async def _fetch_story_details(story_id: uuid.UUID) -> dict | None:
                 return {"headline": row["headline"]}
     return None
 
-async def _generate_script_for_story(story: dict, channel_id: str) -> str:
+async def _generate_script_for_story(story: dict, channel: Channel) -> str:
     """
-    Calls the LLM to generate the storyboard markdown.
-    Fetches the active voice profile from the database configuration.
+    Call the LLM to generate the storyboard markdown for one channel.
+
+    The channel supplies voice and prompt. Compliance rules come from
+    channels.BASE_COMPLIANCE_RULES and are not channel-overridable.
     """
     headline = story.get("headline", "Default Headline")
-    
-    # Fetch active voice profile and blocklist from DB config
-    import json
+
     import os
-    from app import db
     from google import genai
     from google.genai import types
-    
-    config_data = await db.get_config("voice_profiles")
-    
-    active_prompt = "Default AI voice prompt."
-    active_blocklist = []
-    preset_name = "default"
-    
-    if config_data:
-        try:
-            active_id = config_data.get("activeProfileId")
-            profiles = config_data.get("profiles", [])
-            active_profile = next((p for p in profiles if p.get("id") == active_id), profiles[0] if profiles else None)
-            
-            if active_profile:
-                active_prompt = active_profile.get("prompt", active_prompt)
-                active_blocklist = active_profile.get("blocklist", active_blocklist)
-                preset_name = active_profile.get("id", preset_name)
-        except Exception as e:
-            log.error("voice_profile_fetch_error", error=str(e))
-    
-    # Construct System Instructions
-    blocklist_str = ", ".join([f'"{word}"' for word in active_blocklist])
+
+    blocklist_str = ", ".join(f'"{word}"' for word in channel.effective_blocklist)
+
     system_instruction = f"""You are generating a script for a faceless YouTube explainer video.
-Your Voice & Personality: {active_prompt}
+Your Voice & Personality: {channel.script_prompt}
 
 COMPLIANCE RULES (CRITICAL):
-Do not provide financial advice. Do not recommend buying or selling any specific security or product.
-Explain what happened and why it's interesting — never what the reader should do.
+{BASE_COMPLIANCE_RULES}
 ABSOLUTELY FORBIDDEN WORDS: {blocklist_str}.
+These rules and forbidden words apply to the YAML frontmatter, including the
+title and description fields, exactly as they apply to the narration.
 
 FORMAT:
 You must output a valid markdown document that starts with YAML frontmatter.
@@ -304,7 +321,7 @@ Example format:
 ---
 title: "The video title"
 description: "A highly detailed, SEO-optimized description of the video. Write this as a human expert. NEVER mention or allude to AI, ChatGPT, or automated generation."
-preset: {preset_name}
+preset: {channel.voice_key}
 music: soft upbeat playful
 ---
 
@@ -317,8 +334,8 @@ Visual: "A bright, cute title card..."
 """
 
     user_prompt = f"Write a video script for the following story headline:\n{headline}"
-    
-    log.info("gemini_generation_started", preset=preset_name)
+
+    log.info("gemini_generation_started", channel_id=channel.id, preset=channel.voice_key)
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -364,7 +381,16 @@ Visual: "A bright, cute title card..."
     log.error("gemini_generation_failed", attempts=attempt, error=str(last_error))
     raise RuntimeError(f"script generation failed after {attempt} attempts: {last_error}")
 
-async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_preference: str, file_path: str, status: str, external_id: str | None) -> uuid.UUID | None:
+async def _record_youtube_draft(
+    story_id: uuid.UUID,
+    channel_id: str,
+    upload_preference: str,
+    file_path: str,
+    status: str,
+    external_id: str | None,
+    title: str,
+    description: str,
+) -> uuid.UUID | None:
     pool = await db.get_pool()
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
@@ -385,7 +411,9 @@ async def _record_youtube_draft(story_id: uuid.UUID, channel_id: str, upload_pre
                     db._dumps({
                         "file_path": file_path,
                         "channel_id": channel_id,
-                        "upload_preference": upload_preference
+                        "upload_preference": upload_preference,
+                        "title": title,
+                        "description": description,
                     }),
                     status,
                     db._dumps({"youtube": external_id}) if external_id else None,
@@ -871,49 +899,6 @@ async def _generate_audio_for_script(script_content: str, output_path: Path):
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", str(output_path)
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-async def _upload_to_youtube(video_path: str, title: str, description: str) -> str:
-    """
-    Uploads a video to YouTube Data API v3. 
-    Runs the blocking Google API client in a threadpool.
-    """
-    from starlette.concurrency import run_in_threadpool
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    
-    def _do_upload():
-        creds = _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
-        youtube = build("youtube", "v3", credentials=creds)
-        
-        body = {
-            "snippet": {
-                "title": title[:100],  # Max 100 chars
-                "description": description[:5000],  # Max 5000 chars
-                "tags": ["finance", "explainer", "shorts"],
-                "categoryId": "27"  # Education
-            },
-            "status": {
-                "privacyStatus": "private",  # Upload as draft
-                "selfDeclaredMadeForKids": False
-            }
-        }
-        
-        media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
-        request = youtube.videos().insert(
-            part=",".join(body.keys()),
-            body=body,
-            media_body=media
-        )
-        
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status:
-                log.info("youtube_upload_progress", progress=int(status.progress() * 100))
-        
-        return response["id"]
-        
-    return await run_in_threadpool(_do_upload)
-
 async def _generate_thumbnail(title: str, output_path: str):
     """
     Generates a thumbnail using a minimal HTML template and Playwright.
@@ -995,24 +980,6 @@ async def _generate_thumbnail(title: str, output_path: str):
                 
     await run_in_threadpool(_run)
 
-async def _upload_thumbnail(video_id: str, thumbnail_path: str):
-    """
-    Uploads a custom thumbnail for the given YouTube video ID.
-    """
-    from starlette.concurrency import run_in_threadpool
-    from googleapiclient.discovery import build
-    
-    def _do_upload():
-        creds = _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
-        youtube = build("youtube", "v3", credentials=creds)
-        request = youtube.thumbnails().set(
-            videoId=video_id,
-            media_body=thumbnail_path
-        )
-        request.execute()
-        
-    return await run_in_threadpool(_do_upload)
-
 async def get_youtube_analytics(video_ids: list[str]) -> dict:
     """
     Fetches view count, like count, and comment count for the given video IDs.
@@ -1025,8 +992,10 @@ async def get_youtube_analytics(video_ids: list[str]) -> dict:
     from googleapiclient.discovery import build
     
     def _do_fetch():
+        # Read-only: this path only lists statistics. The upload scope it used
+        # to request was a leftover from when this module published videos.
         creds = _get_youtube_credentials(
-            ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/youtube.upload"]
+            ["https://www.googleapis.com/auth/youtube.readonly"]
         )
         youtube = build("youtube", "v3", credentials=creds)
         
@@ -1057,6 +1026,61 @@ async def get_youtube_analytics(video_ids: list[str]) -> dict:
         return {}
 
 
+def _require_metadata(frontmatter: dict[str, str]) -> tuple[str, str]:
+    """Return (title, description) or raise.
+
+    The old publish path read `frontmatter.get("description") or title`, so a
+    generation that produced no description silently yielded a one-line title in
+    the description box. That fallback is gone: an empty field is a generation
+    failure and should be visible.
+    """
+    title = (frontmatter.get("title") or "").strip()
+    description = (frontmatter.get("description") or "").strip()
+
+    missing = [n for n, v in (("title", title), ("description", description)) if not v]
+    if missing:
+        raise ValueError(
+            f"storyboard frontmatter is missing: {', '.join(missing)}"
+        )
+
+    return title, description
+
+
+def _write_upload_txt(
+    video_dir: Path, channel: Channel, title: str, description: str
+) -> Path:
+    """Write the paste-ready metadata beside the storyboard.
+
+    Uploads are manual, so this file is how the metadata reaches YouTube. It also
+    means the metadata survives a database reset and travels with the folder.
+    """
+    lines = [
+        f"CHANNEL: {channel.display_name}",
+        "",
+        "TITLE",
+        "-----",
+        title,
+        "",
+        "DESCRIPTION",
+        "-----------",
+        description,
+        "",
+    ]
+
+    if channel.id == "kids":
+        lines += [
+            "REMINDER",
+            "--------",
+            "Tick \"Made for kids\" in YouTube Studio before publishing. This is a",
+            "COPPA requirement and nothing in this pipeline sets it for you.",
+            "",
+        ]
+
+    path = video_dir / "upload.txt"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def _parse_storyboard_frontmatter(storyboard_path: Path) -> dict[str, str]:
     """
     Parse a simple YAML frontmatter block from the storyboard markdown.
@@ -1074,52 +1098,3 @@ def _parse_storyboard_frontmatter(storyboard_path: Path) -> dict[str, str]:
         except Exception:
             pass
     return frontmatter
-
-
-async def publish_youtube_draft(draft_id: uuid.UUID) -> dict[str, str]:
-    """
-    Publish a pending YouTube draft: upload the rendered MP4, attach a thumbnail,
-    and update the draft record. Returns {video_id, url}.
-    """
-    log.info("youtube_publish_started", draft_id=str(draft_id))
-
-    draft = await db.get_draft(draft_id)
-    if not draft:
-        raise ValueError(f"Draft {draft_id} not found")
-    if draft.get("platform") != "youtube":
-        raise ValueError(f"Draft {draft_id} is not a YouTube draft")
-
-    body = draft.get("body") or {}
-    file_path = body.get("file_path")
-    if not file_path:
-        raise ValueError(f"Draft {draft_id} has no file_path")
-
-    video_path = Path(file_path)
-    if not video_path.exists():
-        raise FileNotFoundError(f"Rendered video not found: {video_path}")
-
-    # Prefer an already-rendered thumbnail; fall back to generating one.
-    thumbnail_path = video_path.parent / "thumbnail.jpg"
-    if not thumbnail_path.exists():
-        thumbnail_path = video_path.parent / "thumbnail.png"
-    if not thumbnail_path.exists():
-        thumbnail_path = video_path.parent / "thumbnail.jpg"
-        await _generate_thumbnail(draft.get("headline", "Video"), str(thumbnail_path))
-
-    storyboard_path = video_path.parent.parent / "STORYBOARD.md"
-    frontmatter = _parse_storyboard_frontmatter(storyboard_path)
-
-    title = frontmatter.get("title") or draft.get("headline") or "Untitled Video"
-    description = frontmatter.get("description") or title
-
-    video_id = await _upload_to_youtube(str(video_path), title, description)
-    await _upload_thumbnail(video_id, str(thumbnail_path))
-
-    await db.update_draft_published(
-        draft_id,
-        status="published",
-        published_ids={"youtube": video_id},
-    )
-
-    log.info("youtube_publish_finished", draft_id=str(draft_id), video_id=video_id)
-    return {"video_id": video_id, "url": f"https://youtube.com/watch?v={video_id}"}
