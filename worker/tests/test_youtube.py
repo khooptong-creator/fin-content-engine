@@ -78,9 +78,14 @@ async def test_generate_youtube_video_manual(
 @patch("app.youtube._build_frames")
 @patch("app.youtube.subprocess.run")
 @patch("app.youtube._generate_thumbnail")
-async def test_generate_youtube_video_auto_status(
+async def test_generate_youtube_video_auto_preference_is_still_pending(
     mock_thumb, mock_run, mock_frames, mock_audio, mock_script, mock_record, mock_fetch, tmp_path
 ):
+    """`upload_preference` no longer selects a publish behaviour.
+
+    It used to write status="published" here, with no video id, for a video
+    nobody had uploaded. See tests/test_generation_resilience.py.
+    """
     story_id = uuid.uuid4()
     mock_fetch.return_value = {"headline": "Test Story"}
     mock_script.return_value = SCRIPT_4_SCENES
@@ -97,7 +102,7 @@ async def test_generate_youtube_video_auto_status(
         )
 
     _, kwargs_rec = mock_record.call_args
-    assert kwargs_rec["status"] == "published"
+    assert kwargs_rec["status"] == "pending"
 
 
 @pytest.mark.asyncio

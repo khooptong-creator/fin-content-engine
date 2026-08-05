@@ -104,6 +104,10 @@ async def generate_youtube_video(
     `backend` selects the frame backend for this run only, so one worker can
     produce both formats without an env change or a restart; `FRAME_BACKEND`
     supplies the default. `job_id`, when given, receives stage progress.
+
+    `upload_preference` is recorded on the draft row for provenance only. It
+    once chose between "review first" and "upload now"; the publish path is
+    gone, so every generated draft is now recorded as pending regardless.
     """
     log.info("youtube_generation_started", story_id=str(story_id), channel_id=channel_id)
 
@@ -241,12 +245,26 @@ async def generate_youtube_video(
 
     thumbnail_path = video_dir / "thumbnail.jpg"
     if not thumbnail_path.exists():
-        await _generate_thumbnail(title, str(thumbnail_path))
+        # A thumbnail is a convenience for the manual upload, nothing more. The
+        # MP4 is already on disk at this point, so letting a missing playwright
+        # install propagate would throw away a completed render and leave no
+        # draft row behind. Only this one call is guarded.
+        try:
+            await _generate_thumbnail(title, str(thumbnail_path))
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "thumbnail_generation_failed",
+                story_id=str(story_id),
+                error=str(exc),
+            )
 
     # 4. Local Draft Registration
     # User requested all output videos to be stored locally and NOT pushed to VPS/Cloud.
-    # "manual" means a human reviews in the dashboard first; "auto" tries to upload immediately.
-    status = "pending" if upload_preference == "manual" else "published"
+    # Nothing in this system publishes any more — uploads are performed by hand
+    # from the drafts page — so a newly generated draft is always "pending".
+    # `upload_preference` is still recorded on the draft row, but it no longer
+    # selects a publish behaviour; there is no publish path left for it to pick.
+    status = "pending"
     external_id = None
 
     draft_id = await _record_youtube_draft(
@@ -974,8 +992,10 @@ async def get_youtube_analytics(video_ids: list[str]) -> dict:
     from googleapiclient.discovery import build
     
     def _do_fetch():
+        # Read-only: this path only lists statistics. The upload scope it used
+        # to request was a leftover from when this module published videos.
         creds = _get_youtube_credentials(
-            ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/youtube.upload"]
+            ["https://www.googleapis.com/auth/youtube.readonly"]
         )
         youtube = build("youtube", "v3", credentials=creds)
         
