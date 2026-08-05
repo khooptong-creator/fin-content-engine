@@ -49,3 +49,19 @@ def test_kids_channel_is_created():
 def test_missing_voice_profiles_raises():
     with pytest.raises(ValueError):
         build_channels_payload(None)
+
+
+def test_unrecognized_voice_id_raises():
+    bad_profiles = {
+        "activeProfileId": "custom_voice",
+        "profiles": [
+            {
+                "id": "custom_voice",
+                "name": "Custom",
+                "prompt": "You are a custom voice.",
+                "blocklist": [],
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="custom_voice"):
+        build_channels_payload(bad_profiles)

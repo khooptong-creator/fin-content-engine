@@ -16,6 +16,8 @@ from app.channels import BASE_BLOCKLIST, CONFIG_KEY
 
 
 def build_channels_payload(voice_profiles: dict | None) -> dict:
+    from app.youtube import VOICE_MAP
+
     if not voice_profiles or not voice_profiles.get("profiles"):
         raise ValueError("no voice_profiles config to migrate from")
 
@@ -27,10 +29,18 @@ def build_channels_payload(voice_profiles: dict | None) -> dict:
     def extras(profile: dict) -> list[str]:
         return [t for t in (profile.get("blocklist") or []) if t not in BASE_BLOCKLIST]
 
+    def check_voice_key(voice_key: str) -> str:
+        if voice_key not in VOICE_MAP:
+            valid = ", ".join(sorted(VOICE_MAP))
+            raise ValueError(
+                f"voice_key {voice_key!r} is not a recognized voice; valid keys: {valid}"
+            )
+        return voice_key
+
     payload = {
         "finance": {
             "display_name": "Finance",
-            "voice_key": active["id"],
+            "voice_key": check_voice_key(active["id"]),
             "script_prompt": active["prompt"],
             "extra_blocklist": extras(active),
         }
@@ -39,7 +49,7 @@ def build_channels_payload(voice_profiles: dict | None) -> dict:
     if baby:
         payload["kids"] = {
             "display_name": "Kids",
-            "voice_key": "baby",
+            "voice_key": check_voice_key("baby"),
             "script_prompt": baby["prompt"],
             "extra_blocklist": extras(baby),
         }
