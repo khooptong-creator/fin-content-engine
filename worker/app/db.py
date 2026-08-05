@@ -556,7 +556,7 @@ async def get_pending_stories() -> list[dict[str, Any]]:
         # Fetch inbox stories
         stories = await _fetchall(
             conn,
-            "SELECT id, headline, status, created_at FROM stories WHERE status = 'inbox' ORDER BY created_at DESC"
+            "SELECT id, headline, status, channel_id, created_at FROM stories WHERE status = 'inbox' ORDER BY created_at DESC"
         )
         
         # For each story, fetch its items
