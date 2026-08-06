@@ -132,5 +132,34 @@ async def build_3d_frames(board, video_dir: Path) -> list[str]:
         reports.append(report)
 
     board.meta["shot_reports"] = reports
+
+    # Persist so the shot-inspector API can serve them without a DB round trip.
+    # probe_pngs includes the story subdirectory so the GUI can reach them via
+    # the already-mounted /videos static mount.
+    import json
+
+    story_dir = video_dir.name  # "story-<uuid>"
+    (video_dir / "renders").mkdir(parents=True, exist_ok=True)
+    (video_dir / "renders" / "shots.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": r.slug,
+                    "ok": r.ok,
+                    "attempts": r.attempts,
+                    "reason": r.reason,
+                    "js": r.js,
+                    "probe_pngs": [
+                        f"{story_dir}/renders/probes/{png}"
+                        for png in r.probe_pngs
+                    ],
+                }
+                for r in reports
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
     log.info("3d_frames_built", frames=len(board.frames), failed=len(failed))
     return failed

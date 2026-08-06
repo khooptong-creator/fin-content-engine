@@ -5,6 +5,7 @@ import { Clapperboard, Loader2, Smartphone } from "lucide-react";
 
 import ChannelSelect, { readErrorDetail, useChannels } from "@/components/ChannelSelect";
 import FilmProgress from "@/components/FilmProgress";
+import ShotInspector from "@/components/ShotInspector";
 
 type Story = { id: string; title: string };
 type Mode = "short" | "film";
@@ -162,6 +163,7 @@ export default function FilmsPage() {
       </section>
 
       {jobId && <FilmProgress jobId={jobId} />}
+      {jobId && <ShotInspector jobId={jobId} />}
     </div>
   );
 }

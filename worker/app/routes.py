@@ -12,7 +12,10 @@ report whether it's running.
 
 from __future__ import annotations
 
+import json
+import os
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -209,6 +212,28 @@ async def youtube_job_status(job_id: str) -> dict:
         key: (str(value) if isinstance(value, uuid.UUID) else value)
         for key, value in job.items()
     }
+
+
+_VIDEOS_DIR = Path(os.environ.get("VIDEOS_DIR", "../videos")).resolve()
+
+
+@router.get("/youtube/jobs/{job_id}/shots")
+async def youtube_job_shots(job_id: str) -> list[dict]:
+    """Per-shot verification reports for the GUI's shot inspector."""
+    from app.jobs import get_job
+
+    try:
+        jid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid job_id (must be a uuid)")
+
+    job = await get_job(jid)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    path = _VIDEOS_DIR / f"story-{job['story_id']}" / "renders" / "shots.json"
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 
