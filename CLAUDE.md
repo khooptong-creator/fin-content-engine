@@ -15,8 +15,9 @@ Cloud is used only where local can't reach the quality bar.
 
 | Stage | Runs | Why |
 |---|---|---|
-| Frame design | **Local** — Ollama `qwen2.5:7b` on the RTX 3070 | Free, no rate limit. Model picks an archetype + fills slots (~dozens of tokens), never writes HTML |
-| Frame HTML | **Local** — `archetypes.py` templates | Pre-validated templates can't emit an invalid composition |
+| Frame design (2D archetypes) | **Local** — Ollama `qwen2.5:7b` on the RTX 3070 | Free, no rate limit. Model picks an archetype + fills slots (~dozens of tokens), never writes HTML |
+| Frame design (3D films) | **Cloud** — Gemini/Claude | Composing a 3D scene is thousands of tokens of spatial reasoning, well past a 7B. Render stays local |
+| Frame HTML | **Local** — `archetypes.py` templates (2D); `scene3d/shell.py` (3D) | Pre-validated templates can't emit an invalid composition; 3D shell owns the contract |
 | Render | **Local** — HyperFrames + ffmpeg | No render credits |
 | Postgres | **Local / VPS** | Supabase free tier pauses |
 | Embeddings | **Local** — gte-small | Supabase hosted OOM-killed |
@@ -24,17 +25,24 @@ Cloud is used only where local can't reach the quality bar.
 | Story/script text | **Cloud** — Gemini/Haiku | Long-form reasoning beyond a 7B |
 | Upload | **Cloud** — YouTube Data API | — |
 
-`FRAME_BACKEND` (`youtube.py`) selects the frame path: `local` (default) or
-`gemini`. Keys live in `worker/.env` (gitignored).
+`FRAME_BACKEND` (`youtube.py`) selects the frame path: `local` (default),
+`gemini`, or `three`. Per-request backend beats the env default. The GUI's
+Short/Film toggle maps to `backend=None` (falls through to `FRAME_BACKEND`) /
+`backend="three"`. Keys live in `worker/.env` (gitignored).
 
 ## Rules
 - Ollama at `127.0.0.1:11434`, never `localhost` — Windows resolves ::1 first and
   Ollama binds IPv4 only.
 - Frame generation is sequential: one GPU serves one request at a time.
-- Never publish a degraded video. Three independent guards in `youtube.py`, all
+- Never publish a degraded video. Four independent guards in `youtube.py`, all
   needed because each failure produces something that renders and validates
   cleanly: `MIN_SCRIPT_FRAMES` (a stubbed script scores 100% on every ratio),
-  `MAX_SILENT_RATIO`, `MAX_PLACEHOLDER_RATIO`.
+  `MAX_SILENT_RATIO`, `MAX_PLACEHOLDER_RATIO`, and `MIN_VERIFIED_FRAMES`
+  (absolute floor — a two-frame film with one good shot reads as 50% fine).
+- The 3D backend lets a model write JavaScript, which reopens the malformed-
+  composition failure class the 2D archetypes exclude by construction. The
+  headless render gate in `scene3d/verify.py` is the entire mitigation — a
+  weakened gate ships broken videos.
 - Never fabricate a script when the LLM fails. It becomes a publishable draft.
 - Tests must not touch the network. Patch `_build_frames`, not a backend.
 - Don't run `pytest` while an end-to-end run is in flight — the DB tests
