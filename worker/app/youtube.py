@@ -349,6 +349,19 @@ Visual: "A bright, cute title card..."
 
     user_prompt = f"Write a video script for the following story headline:\n{headline}"
 
+    provider = os.environ.get("SCENE_MODEL_PROVIDER", "gemini").lower()
+    if provider == "deepseek":
+        return await _generate_script_deepseek(system_instruction, user_prompt)
+    return await _generate_script_gemini(system_instruction, user_prompt, channel)
+
+
+async def _generate_script_gemini(
+    system_instruction: str, user_prompt: str, channel: Channel
+) -> str:
+    import os
+    from google import genai
+    from google.genai import types
+
     log.info("gemini_generation_started", channel_id=channel.id, preset=channel.voice_key)
 
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -358,9 +371,8 @@ Visual: "A bright, cute title card..."
     client = genai.Client(api_key=api_key)
 
     def call_gemini():
-        # The SDK is synchronous; off the event loop so the pool keeps serving.
         return client.models.generate_content(
-            model='gemini-flash-latest',
+            model="gemini-flash-latest",
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -368,11 +380,6 @@ Visual: "A bright, cute title card..."
             ),
         )
 
-    # This used to swallow every failure and return a one-scene stub. That stub
-    # renders cleanly and passes the placeholder and silence guards — one good
-    # frame out of one is a perfect score — so a Gemini outage produced a five
-    # second "video" recorded as a draft ready to publish. There is no safe
-    # fabricated script: fail loudly and let the caller abort.
     last_error: Exception | None = None
     for attempt in range(1, SCRIPT_MAX_ATTEMPTS + 1):
         try:
@@ -383,7 +390,7 @@ Visual: "A bright, cute title card..."
             last_error = e
             if attempt == SCRIPT_MAX_ATTEMPTS or not _is_retryable(e):
                 break
-            delay = 2 ** attempt
+            delay = 2**attempt
             log.warning(
                 "gemini_generation_retry",
                 attempt=attempt,
@@ -393,7 +400,71 @@ Visual: "A bright, cute title card..."
             await asyncio.sleep(delay)
 
     log.error("gemini_generation_failed", attempts=attempt, error=str(last_error))
-    raise RuntimeError(f"script generation failed after {attempt} attempts: {last_error}")
+    raise RuntimeError(
+        f"script generation failed after {attempt} attempts: {last_error}"
+    )
+
+
+async def _generate_script_deepseek(
+    system_instruction: str, user_prompt: str
+) -> str:
+    import os
+
+    import httpx
+
+    api_key = os.environ["DEEPSEEK_API_KEY"]
+    base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    model = os.environ.get("SCENE_MODEL", "deepseek-chat")
+
+    log.info("deepseek_generation_started", model=model)
+
+    last_error: Exception | None = None
+    for attempt in range(1, SCRIPT_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                response = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_instruction},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.7,
+                    },
+                )
+                if response.status_code in (429, 503, 500):
+                    raise httpx.HTTPStatusError(
+                        f"{response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                response.raise_for_status()
+                data = response.json()
+                text = data["choices"][0]["message"]["content"] or ""
+                log.info("deepseek_generation_completed", attempt=attempt)
+                return text
+        except Exception as e:
+            last_error = e
+            if attempt == SCRIPT_MAX_ATTEMPTS or not _is_retryable(e):
+                break
+            delay = 2**attempt
+            log.warning(
+                "deepseek_generation_retry",
+                attempt=attempt,
+                delay=delay,
+                error=str(e)[:160],
+            )
+            await asyncio.sleep(delay)
+
+    log.error("deepseek_generation_failed", attempts=attempt, error=str(last_error))
+    raise RuntimeError(
+        f"script generation failed after {attempt} attempts: {last_error}"
+    )
 
 async def _record_youtube_draft(
     story_id: uuid.UUID,

@@ -36,6 +36,7 @@ def _captured_system_instruction(mock_client) -> str:
 @pytest.mark.parametrize("channel", [FINANCE, KIDS], ids=["finance", "kids"])
 async def test_compliance_rules_present_for_every_channel(channel, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("SCENE_MODEL_PROVIDER", "gemini")
     from app import youtube
 
     with patch("google.genai.Client") as mock_client:
@@ -51,6 +52,7 @@ async def test_compliance_rules_present_for_every_channel(channel, monkeypatch):
 @pytest.mark.asyncio
 async def test_channel_prompt_is_used(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("SCENE_MODEL_PROVIDER", "gemini")
     from app import youtube
 
     with patch("google.genai.Client") as mock_client:
@@ -67,6 +69,7 @@ async def test_channel_prompt_is_used(monkeypatch):
 @pytest.mark.asyncio
 async def test_blocklist_terms_all_present(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("SCENE_MODEL_PROVIDER", "gemini")
     from app import youtube
 
     with patch("google.genai.Client") as mock_client:
@@ -83,6 +86,7 @@ async def test_blocklist_terms_all_present(monkeypatch):
 @pytest.mark.asyncio
 async def test_instruction_states_frontmatter_is_covered(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("SCENE_MODEL_PROVIDER", "gemini")
     from app import youtube
 
     with patch("google.genai.Client") as mock_client:
@@ -99,6 +103,7 @@ async def test_instruction_states_frontmatter_is_covered(monkeypatch):
 async def test_no_voice_profiles_lookup_remains(monkeypatch):
     """The activeProfileId path is gone: generation must not read that key."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("SCENE_MODEL_PROVIDER", "gemini")
     from app import youtube
 
     get_config = AsyncMock(return_value=None)
