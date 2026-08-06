@@ -60,6 +60,10 @@ PACING_PROFILES: dict[str, Pacing] = {
     # Real-time news for adults: viewers already have the vocabulary and the
     # value is recency, so the cut is tighter and the cadence quicker.
     "news": Pacing(floor=2.0, soft_ceiling=8.0, lead_in=0.15, tail=0.3),
+    # Narrated story films. The camera is doing the work, so a shot can hold
+    # far longer than an explainer card without going dead — and cutting on
+    # every clause would destroy the sense of a continuous place.
+    "story": Pacing(floor=4.0, soft_ceiling=20.0, lead_in=0.4, tail=0.8),
 }
 
 DEFAULT_PACING = "explainer"

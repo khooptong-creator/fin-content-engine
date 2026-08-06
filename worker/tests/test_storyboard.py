@@ -255,3 +255,42 @@ def test_background_is_on_full_bleed_child_not_root():
 def test_bgm_can_be_omitted_when_no_track_exists():
     html = render_index_html(_timed_board(), with_bgm=False)
     assert 'id="el-bgm"' not in html
+
+
+# ---------------------------------------------------------------------------
+# Story pacing profile (3D narrative films)
+# ---------------------------------------------------------------------------
+
+def test_story_pacing_profile_exists():
+    assert "story" in PACING_PROFILES
+
+
+def test_story_pacing_breathes_longer_than_news():
+    story, news = PACING_PROFILES["story"], PACING_PROFILES["news"]
+    assert story.floor > news.floor
+    assert story.soft_ceiling > news.soft_ceiling
+
+
+def test_story_pacing_resolves_from_frontmatter():
+    board = parse_storyboard(
+        '---\ntitle: "Tale"\npacing: story\n---\n\n# Scene 1\nVoiceover: "a"\n'
+    )
+    assert resolve_pacing(None, board) is PACING_PROFILES["story"]
+
+
+def test_landscape_format_is_read_from_frontmatter():
+    board = parse_storyboard(
+        '---\ntitle: "Wide"\nformat: 1920x1080\n---\n\n# Scene 1\nVoiceover: "a"\n'
+    )
+    assert board.width == 1920
+    assert board.height == 1080
+
+
+def test_landscape_pacing_is_story():
+    """Landscape films default to story pacing — a format-pacing mismatch
+    would pair 2s news cuts with sweeping establishing shots."""
+    board = parse_storyboard(
+        '---\ntitle: "Wide"\nformat: 1920x1080\n---\n\n# Scene 1\nVoiceover: "a"\n'
+    )
+    # format alone doesn't choose pacing; frontmatter must say "pacing: story"
+    assert resolve_pacing(None, board) is PACING_PROFILES["explainer"]  # default
