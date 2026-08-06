@@ -255,3 +255,61 @@ def test_get_youtube_credentials_missing_token(tmp_path):
     with patch.object(get_settings(), "youtube_token_path", tmp_path / "missing.json"):
         with pytest.raises(RuntimeError):
             _get_youtube_credentials(["https://www.googleapis.com/auth/youtube.upload"])
+
+
+# ---------------------------------------------------------------------------
+# Per-request backend dispatch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_frames_routes_to_three(tmp_path):
+    """Per-request backend beats the env default, so both formats run from one worker."""
+    from app.storyboard import Storyboard
+    from app import youtube
+
+    with patch(
+        "app.youtube.build_3d_frames", new=AsyncMock(return_value=[])
+    ) as three:
+        await youtube._build_frames(Storyboard(), tmp_path, backend="three")
+    three.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("app.channels.resolve")
+@patch("app.youtube._fetch_story_details")
+@patch("app.youtube._record_youtube_draft")
+@patch("app.youtube._generate_script_for_story")
+@patch("app.youtube._generate_frame_audio")
+@patch("app.youtube._build_frames")
+@patch("app.youtube.subprocess.run")
+async def test_generation_aborts_below_min_verified_frames(
+    mock_run,
+    mock_frames,
+    mock_audio,
+    mock_script,
+    mock_record,
+    mock_fetch,
+    mock_channels,
+    tmp_path,
+):
+    """An absolute floor. Ratios read a two-frame film with one good shot as 50% fine."""
+    mock_fetch.return_value = {"id": "s1", "title": "T", "summary": "S"}
+    mock_channels.return_value = FINANCE
+    mock_script.return_value = (
+        "---\ntitle: T\ndescription: A test film\nformat: 1920x1080\npacing: story\n---\n"
+        "# Scene 1\nVoiceover: a\n# Scene 2\nVoiceover: b\n"
+        "# Scene 3\nVoiceover: c\n# Scene 4\nVoiceover: d\n"
+    )
+    mock_audio.return_value = []
+    # Two of four shots never passed the gate: only two verified remain.
+    mock_frames.return_value = ["f01-frame", "f02-frame"]
+    mock_run.return_value = MagicMock(returncode=0)
+
+    with patch("app.youtube.VIDEOS_DIR", tmp_path):
+        result = await generate_youtube_video(
+            uuid.uuid4(), "ch1", backend="three"
+        )
+
+    assert result is None
+    mock_record.assert_not_called()

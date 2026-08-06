@@ -10,6 +10,7 @@ import structlog
 
 from app import db
 from app.channels import BASE_COMPLIANCE_RULES, Channel
+from app.scene3d.backend import MIN_VERIFIED_FRAMES, build_3d_frames
 from app.settings import get_settings
 from app.storyboard import (
     Frame,
@@ -207,6 +208,19 @@ async def generate_youtube_video(
         if ratio > MAX_PLACEHOLDER_RATIO:
             log.error("youtube_generation_aborted", reason="too_many_placeholder_frames")
             return None
+
+    verified = len(board.frames) - len(placeholders)
+    if verified < MIN_VERIFIED_FRAMES:
+        # Absolute, not proportional. Every ratio above reads a two-frame film
+        # with one good shot as a healthy 50%, and a one-frame film as flawless.
+        log.error(
+            "youtube_generation_aborted",
+            reason="too_few_verified_frames",
+            story_id=str(story_id),
+            verified=verified,
+            minimum=MIN_VERIFIED_FRAMES,
+        )
+        return None
 
     package_json_path = video_dir / "package.json"
     if not package_json_path.exists():
@@ -619,6 +633,8 @@ async def _build_frames(
     restart; FRAME_BACKEND only supplies the default.
     """
     chosen = (backend or FRAME_BACKEND).lower()
+    if chosen == "three":
+        return await build_3d_frames(board, video_dir)
     if chosen == "gemini":
         return await _generate_frame_compositions(board, video_dir)
     return await _generate_frame_compositions_local(board, video_dir)
