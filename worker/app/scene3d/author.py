@@ -18,9 +18,29 @@ import structlog
 
 log = structlog.get_logger()
 
-# Deferred to call time — pydantic-settings loads .env during lifespan,
-# which runs after module imports. Reading these at module level always
-# returns the default.
+# Ensure .env is loaded before we read from os.environ. pydantic-settings
+# loads it during lifespan (after imports), but this module is imported at
+# module level by youtube.py, which runs first.
+def _load_dotenv() -> None:
+    from pathlib import Path
+
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.exists():
+        return
+    with open(env_file, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip().strip("\"'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_dotenv()
+
+
 def _scene_model() -> str:
     return os.environ.get("SCENE_MODEL", "gemini-2.0-flash")
 
