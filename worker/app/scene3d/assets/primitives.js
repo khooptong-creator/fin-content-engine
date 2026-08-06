@@ -56,7 +56,7 @@
     var height = opts.height || 1080;
     var background = opts.background || '#0B1220';
 
-    var canvas = document.querySelector('canvas');
+    var canvas = opts.canvas || document.querySelector('canvas');
     var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
     renderer.setSize(width, height, false);
     renderer.setClearColor(new THREE.Color(background), 1);
