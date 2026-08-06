@@ -517,12 +517,12 @@ async def _record_youtube_draft(
 # silence. Everything below is `premade`, which is free-tier usable.
 # Re-check with: client.voices.get_all() -> category == "premade".
 VOICE_MAP = {
-    "teenage_boy": "TX3LPaxmHKxFdv7VOQHJ",   # Liam - energetic social-media creator
-    "teenage_girl": "cgSgspJ2msm6clMCkdW9",  # Jessica - playful, bright, warm
-    "adult_male": "cjVigY5qzO86Huf0OWal",    # Eric - smooth, trustworthy
-    "adult_female": "EXAVITQu4vr4xnSDxMaL",  # Sarah - mature, reassuring
-    "news": "onwK4e9ZLuTAKqWW03F9",          # Daniel - steady broadcaster
-    "baby": "cgSgspJ2msm6clMCkdW9",          # Jessica - no child voice is premade
+    "teenage_boy": "en-US-EricNeural",         # Young male
+    "teenage_girl": "en-US-AriaNeural",        # Warm expressive female
+    "adult_male": "en-US-GuyNeural",           # Smooth male
+    "adult_female": "en-US-JennyNeural",       # Friendly female
+    "news": "en-US-DavisNeural",               # Steady male narrator
+    "baby": "en-US-AnaNeural",                 # Child voice — actually sounds like a kid
 }
 DEFAULT_VOICE = "adult_male"
 
@@ -539,21 +539,11 @@ def _extract_preset(script_content: str) -> str:
 
 
 async def _synthesize_line(client: Any, text: str, voice_id: str, output_path: Path) -> None:
-    """Render one narration line to its own mp3.
+    """Render one narration line to its own mp3 via Edge TTS (free, no API key)."""
+    import edge_tts
 
-    elevenlabs>=2 removed client.generate(); text_to_speech.convert() replaces it
-    and takes voice_id/model_id rather than voice/model. It is not awaited — it
-    returns the async byte iterator directly.
-    """
-    audio_stream = client.text_to_speech.convert(
-        voice_id=voice_id,
-        text=text,
-        model_id="eleven_multilingual_v2",
-        output_format="mp3_44100_128",
-    )
-    with open(output_path, "wb") as fh:
-        async for chunk in audio_stream:
-            fh.write(chunk)
+    communicate = edge_tts.Communicate(text, voice_id)
+    await communicate.save(str(output_path))
 
 
 def _write_silence(output_path: Path, seconds: float = 4.0) -> None:
@@ -589,17 +579,8 @@ async def _generate_frame_audio(
     voice_id = VOICE_MAP.get(preset, VOICE_MAP[DEFAULT_VOICE])
     api_key = os.environ.get("ELEVENLABS_API_KEY")
 
-    if not api_key:
-        log.warning("elevenlabs_api_key_missing", fallback="silent_frames")
-        for frame in board.frames:
-            _write_silence(video_dir / frame.voice_filename)
-        return
-
-    client = AsyncElevenLabs(api_key=api_key)
-
-    # ElevenLabs bills concurrency, not just characters: the free plan allows 2
-    # requests in parallel and 429s the rest. Fanning out one call per frame put
-    # most of a board over that line and silently silenced those frames.
+    # Edge TTS is free with no API key, no rate limits, and decent quality.
+    # Concurrency gate is kept light — 4 parallel renders is plenty.
     gate = asyncio.Semaphore(TTS_MAX_CONCURRENCY)
     silenced: list[str] = []
 
@@ -611,7 +592,7 @@ async def _generate_frame_audio(
         for attempt in range(TTS_MAX_ATTEMPTS):
             try:
                 async with gate:
-                    await _synthesize_line(client, frame.voiceover, voice_id, destination)
+                    await _synthesize_line(None, frame.voiceover, voice_id, destination)
                 return
             except Exception as exc:
                 # A concurrency 429 clears on its own, so it is worth waiting out.
