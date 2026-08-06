@@ -104,6 +104,89 @@ async def author_world(board) -> str:
     return code
 
 
+SHOT_SYSTEM_PROMPT = """You are a cinematographer framing ONE shot inside an existing low-poly 3D world.
+
+The world module is given to you. You do not rebuild it — you place the camera,
+set the light for the time of day, add any props specific to this moment, and
+animate the shot on the timeline.
+
+IN SCOPE for your code: `scene`, `camera`, `cam`, `tl`, `state`, and `Prim.*`.
+The world's root group is already added to the scene as `world`.
+
+AVAILABLE API — ONLY these, on `Prim`:
+  Geometry: Prim.plane Prim.dome Prim.cone Prim.box Prim.cyl Prim.sphere
+  Composite:Prim.tree Prim.flower Prim.fence Prim.path Prim.windowPane Prim.door Prim.building
+  Finance:  Prim.coin Prim.vault Prim.stack Prim.chart3d
+  Layout:   Prim.scatter Prim.row Prim.place
+  Light:    Prim.sun Prim.ambient Prim.pointGlow Prim.bloom
+  Type:     Prim.text3d
+  Timing:   Prim.beat
+  Camera:   cam.at(x,y,z) cam.lookAt(x,y,z) cam.dolly(from,to,dur) cam.orbit(r,h,dur,lookAt)
+
+HARD RULES:
+- NEVER import Three.js. NEVER construct THREE.* directly.
+- NEVER use requestAnimationFrame, Date.now, performance.now or setInterval.
+  The renderer SEEKS a paused timeline; wall-clock animation renders frozen.
+- NEVER use Math.random. Use Prim.rand().
+- ALL animation must be on `tl` (the paused timeline), spanning the shot duration.
+- The camera must MOVE or something in frame must move. A completely static
+  shot is rejected automatically.
+- The camera must be OUTSIDE all geometry and something must be lit and visible.
+  A black or uniform frame is rejected automatically.
+- NO humanoid characters.
+- NEVER write `import` or `export` — this is a classic script, not an ES module.
+
+Write statements only — no function wrapper, no imports, no exports.
+Return ONLY JavaScript in a ```javascript fence."""
+
+
+async def author_shot(
+    board,
+    frame,
+    world_code: str,
+    prior_shots: list[str],
+    last_error: str | None = None,
+) -> str:
+    """Frame one scene inside the film's world.
+
+    ``prior_shots`` is passed for the same reason the 2D path passes used
+    archetypes: each shot is authored in isolation, and without the history the
+    model reaches for the same camera every time and the film reads as one
+    angle repeated.
+    """
+    recent = "\n\n".join(prior_shots[-3:]) or "none yet — this is the first shot"
+    parts = [
+        f"FILM: {board.title}",
+        f"DIRECTION: {board.direction or 'none given'}",
+        f"SHOT DURATION: {frame.duration:.1f} seconds",
+        "",
+        "WORLD MODULE (already built and added to the scene as `world`):",
+        "```javascript",
+        world_code,
+        "```",
+        "",
+        f"THIS SHOT — scene: {frame.scene or frame.title}",
+        f"NARRATION OVER IT: {frame.voiceover}",
+        "",
+        "PREVIOUS SHOTS (do not repeat these camera angles):",
+        "```javascript",
+        recent,
+        "```",
+    ]
+    if last_error:
+        parts += [
+            "",
+            "YOUR PREVIOUS ATTEMPT WAS REJECTED. Fix this specific problem:",
+            f"  {last_error}",
+        ]
+    text = await _call_model(SHOT_SYSTEM_PROMPT, "\n".join(parts))
+    code = extract_js(text)
+    log.info(
+        "shot_authored", slug=frame.slug, chars=len(code), retry=bool(last_error)
+    )
+    return code
+
+
 async def _call_model(system: str, user: str) -> str:
     """Single cloud call. Retries transient failures, then raises."""
     import asyncio
