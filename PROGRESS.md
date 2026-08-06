@@ -20,7 +20,7 @@
 | **P6 — Analytics & hardening** | ⬜ Not started | |
 | **YT P1/P2 — Scripting & Audio** | ✅ Completed | LLM Markdown scripts (Gemini) + ElevenLabs TTS integrated in Worker. |
 | **YT P4 — YouTube API Upload** | ❌ Dropped | Uploads are manual. Publish path deleted 2026-08-06; see YT P5. |
-| **YT P5 — Per-channel config** | ✅ Merged | Two channels (finance, kids) off one engine. Compliance floor as code constants. Every render ships `upload.txt` with title + SEO description. Migration 008 and the `channels` config applied to local and VPS Postgres. **Code not yet deployed to the VPS** — it still runs `16e867a`. |
+| **YT P5 — Per-channel config** | ✅ **DEPLOYED** | Two channels (finance, kids) off one engine. Compliance floor as code constants. Every render ships `upload.txt` with title + SEO description. Migration 008 + channels config applied to local and VPS Postgres. Deployed to VPS 2026-08-06 (was stuck behind safe.directory). |
 
 ---
 
