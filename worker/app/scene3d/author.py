@@ -18,12 +18,23 @@ import structlog
 
 log = structlog.get_logger()
 
-SCENE_MODEL = os.environ.get("SCENE_MODEL", "gemini-2.0-flash")
-SCENE_MODEL_PROVIDER = os.environ.get("SCENE_MODEL_PROVIDER", "gemini").lower()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = os.environ.get(
-    "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
-)
+# Deferred to call time — pydantic-settings loads .env during lifespan,
+# which runs after module imports. Reading these at module level always
+# returns the default.
+def _scene_model() -> str:
+    return os.environ.get("SCENE_MODEL", "gemini-2.0-flash")
+
+
+def _scene_provider() -> str:
+    return os.environ.get("SCENE_MODEL_PROVIDER", "gemini").lower()
+
+
+def _deepseek_api_key() -> str:
+    return os.environ.get("DEEPSEEK_API_KEY", "")
+
+
+def _deepseek_base_url() -> str:
+    return os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 
 # Matches a fenced JS block — ```javascript, ```js, or bare ```
 _FENCE = re.compile(r"```(?:javascript|js)?\s*\n(.*?)```", re.DOTALL)
@@ -199,7 +210,7 @@ def _is_retryable_status(status: int) -> bool:
 
 async def _call_model(system: str, user: str) -> str:
     """Single cloud call. Retries transient failures, then raises."""
-    if SCENE_MODEL_PROVIDER == "deepseek":
+    if _scene_provider() == "deepseek":
         return await _call_deepseek(system, user)
     return await _call_gemini(system, user)
 
@@ -224,7 +235,7 @@ async def _call_gemini(system: str, user: str) -> str:
     async def _once() -> str:
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model=SCENE_MODEL,
+            model=_scene_model(),
             contents=user,
             config=types.GenerateContentConfig(
                 system_instruction=system, temperature=0.7
@@ -241,12 +252,15 @@ async def _call_deepseek(system: str, user: str) -> str:
     import httpx
     from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-    if not DEEPSEEK_API_KEY:
+    api_key = _deepseek_api_key()
+    if not api_key:
         raise RuntimeError(
             "DEEPSEEK_API_KEY is required when SCENE_MODEL_PROVIDER=deepseek"
         )
 
-    model = SCENE_MODEL if SCENE_MODEL != "gemini-2.0-flash" else "deepseek-chat"
+    model = _scene_model()
+    if model == "gemini-2.0-flash":
+        model = "deepseek-chat"
 
     def _should_retry(exc: BaseException) -> bool:
         if isinstance(exc, httpx.HTTPStatusError):
@@ -262,9 +276,9 @@ async def _call_deepseek(system: str, user: str) -> str:
     async def _once() -> str:
         async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
-                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                f"{_deepseek_base_url()}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
