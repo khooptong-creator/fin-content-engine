@@ -1,7 +1,7 @@
 """Gate wiring. The browser is patched; Chromium is exercised in the e2e run."""
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -28,8 +28,8 @@ def _patch_verify(page, errors=None):
     if errors is None:
         errors = []
     # screenshot() must return bytes for write_bytes()
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfake")
-    page.close = AsyncMock()
+    page.screenshot = Mock(return_value=b"\x89PNG\r\n\x1a\nfake")
+    page.close = Mock()
     return (
         patch("app.scene3d.verify._browser", side_effect=_mock_browser),
         patch("app.scene3d.verify._open_page", return_value=(page, errors)),
@@ -43,7 +43,7 @@ def _patch_verify(page, errors=None):
 @pytest.mark.asyncio
 async def test_verify_shot_passes_a_healthy_frame(tmp_path):
     page = AsyncMock()
-    page.evaluate = AsyncMock(
+    page.evaluate = Mock(
         side_effect=[
             _stats("0000ffff00001111"),
             _stats("0000ffff00003333"),
@@ -64,7 +64,7 @@ async def test_verify_shot_passes_a_healthy_frame(tmp_path):
 async def test_console_error_fails_the_shot_before_probing(tmp_path):
     """A shot that threw is rejected on the error, not on how it happened to look."""
     page = AsyncMock()
-    page.evaluate = AsyncMock(return_value=_stats("0000ffff00001111"))
+    page.evaluate = Mock(return_value=_stats("0000ffff00001111"))
     p_browser, p_open = _patch_verify(page, errors=["TypeError: P.hill is not a function"])
     with p_browser, p_open:
         verdict, probes, errors = await verify_shot(
@@ -78,7 +78,7 @@ async def test_console_error_fails_the_shot_before_probing(tmp_path):
 @pytest.mark.asyncio
 async def test_probes_are_taken_at_the_declared_fractions(tmp_path):
     page = AsyncMock()
-    page.evaluate = AsyncMock(return_value=_stats("0000ffff00001111"))
+    page.evaluate = Mock(return_value=_stats("0000ffff00001111"))
     p_browser, p_open = _patch_verify(page)
     with p_browser, p_open:
         await verify_shot(tmp_path / "f01.html", 10.0, tmp_path)
@@ -90,7 +90,7 @@ async def test_probes_are_taken_at_the_declared_fractions(tmp_path):
 @pytest.mark.asyncio
 async def test_probe_stats_are_returned_as_dataclasses(tmp_path):
     page = AsyncMock()
-    page.evaluate = AsyncMock(return_value=_stats("0000ffff00001111"))
+    page.evaluate = Mock(return_value=_stats("0000ffff00001111"))
     p_browser, p_open = _patch_verify(page)
     with p_browser, p_open:
         _, probes, _ = await verify_shot(tmp_path / "f01.html", 3.0, tmp_path)

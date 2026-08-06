@@ -13,6 +13,7 @@ show a human.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -62,31 +63,48 @@ _STATS_JS = """
 
 @asynccontextmanager
 async def _browser():
-    from playwright.async_api import async_playwright
+    """Launch Chromium via the sync Playwright API in a thread.
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
+    Playwright's async API spawns a Node.js subprocess, and Python 3.14's
+    ProactorEventLoop (the Windows default) does not support subprocesses.
+    Running the sync API through ``asyncio.to_thread`` works around this
+    without changing the caller's async contract.
+    """
+    def _launch():
+        from playwright.sync_api import sync_playwright
+
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(
             args=[
                 "--use-gl=angle",
                 "--enable-unsafe-swiftshader",
                 "--hide-scrollbars",
             ]
         )
-        try:
-            yield browser
-        finally:
-            await browser.close()
+        return pw, browser
+
+    pw, browser = await asyncio.to_thread(_launch)
+    try:
+        yield browser
+    finally:
+        await asyncio.to_thread(browser.close)
+        await asyncio.to_thread(pw.stop)
 
 
 async def _open_page(browser, frame_path: Path):
     """Load a frame and collect anything it complained about."""
-    page = await browser.new_page(viewport={"width": 1920, "height": 1080})
-    errors: list[str] = []
-    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    await page.goto(frame_path.resolve().as_uri())
-    await page.wait_for_timeout(400)
-    return page, errors
+    def _load():
+        from playwright.sync_api import Page
+
+        page: Page = browser.new_page(viewport={"width": 1920, "height": 1080})
+        errors: list[str] = []
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(frame_path.resolve().as_uri())
+        page.wait_for_timeout(400)
+        return page, errors
+
+    return await asyncio.to_thread(_load)
 
 
 async def verify_shot(
@@ -107,12 +125,12 @@ async def verify_shot(
         probes: list[ProbeStats] = []
         for i, fraction in enumerate(PROBE_FRACTIONS):
             t = fraction * duration
-            raw = await page.evaluate(_STATS_JS, [slug, t])
+            raw = await asyncio.to_thread(page.evaluate, _STATS_JS, [slug, t])
             probes.append(ProbeStats(t=t, **raw))
-            shot = await page.screenshot()
+            shot = await asyncio.to_thread(page.screenshot)
             (out_dir / f"{slug}-p{i}.png").write_bytes(shot)
 
-        await page.close()
+        await asyncio.to_thread(page.close)
 
     verdict = judge_shot(probes)
     log.info("shot_verified", slug=slug, ok=verdict.ok, reason=verdict.reason)
