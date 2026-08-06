@@ -61,76 +61,70 @@ _STATS_JS = """
 """
 
 
-@asynccontextmanager
-async def _browser():
-    """Launch Chromium via the sync Playwright API in a thread.
-
-    Playwright's async API spawns a Node.js subprocess, and Python 3.14's
-    ProactorEventLoop (the Windows default) does not support subprocesses.
-    Running the sync API through ``asyncio.to_thread`` works around this
-    without changing the caller's async contract.
-    """
-    def _launch():
-        from playwright.sync_api import sync_playwright
-
-        pw = sync_playwright().start()
-        browser = pw.chromium.launch(
-            args=[
-                "--use-gl=angle",
-                "--enable-unsafe-swiftshader",
-                "--hide-scrollbars",
-            ]
-        )
-        return pw, browser
-
-    pw, browser = await asyncio.to_thread(_launch)
-    try:
-        yield browser
-    finally:
-        await asyncio.to_thread(browser.close)
-        await asyncio.to_thread(pw.stop)
-
-
-async def _open_page(browser, frame_path: Path):
-    """Load a frame and collect anything it complained about."""
-    def _load():
-        from playwright.sync_api import Page
-
-        page: Page = browser.new_page(viewport={"width": 1920, "height": 1080})
-        errors: list[str] = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(frame_path.resolve().as_uri())
-        page.wait_for_timeout(400)
-        return page, errors
-
-    return await asyncio.to_thread(_load)
-
-
 async def verify_shot(
     frame_path: Path, duration: float, out_dir: Path
 ) -> tuple[ShotVerdict, list[ProbeStats], list[str]]:
-    """Load one generated frame, probe it three times, and judge it."""
+    """Load one generated frame, probe it three times, and judge it.
+
+    Runs entirely via the sync Playwright API inside a single
+    ``asyncio.to_thread`` call — Playwright's sync API uses greenlets
+    internally, and greenlets cannot switch threads. One thread for
+    the whole lifecycle avoids ``greenlet.error: Cannot switch to a
+    different thread``.
+    """
     slug = frame_path.stem
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    async with _browser() as browser:
-        page, errors = await _open_page(browser, frame_path)
+    def _run():
+        from playwright.sync_api import sync_playwright
 
-        if errors:
-            # Reject on the exception, never on how the broken frame happened to
-            # look. A shot that threw may still paint a plausible background.
-            return ShotVerdict(False, f"runtime error: {errors[0]}"), [], errors
+        pw = sync_playwright().start()
+        try:
+            browser = pw.chromium.launch(
+                args=[
+                    "--use-gl=angle",
+                    "--enable-unsafe-swiftshader",
+                    "--hide-scrollbars",
+                ]
+            )
+            try:
+                page = browser.new_page(
+                    viewport={"width": 1920, "height": 1080}
+                )
+                errors: list[str] = []
+                page.on(
+                    "console",
+                    lambda m: errors.append(m.text)
+                    if m.type == "error"
+                    else None,
+                )
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(frame_path.resolve().as_uri())
+                page.wait_for_timeout(400)
 
-        probes: list[ProbeStats] = []
-        for i, fraction in enumerate(PROBE_FRACTIONS):
-            t = fraction * duration
-            raw = await asyncio.to_thread(page.evaluate, _STATS_JS, [slug, t])
-            probes.append(ProbeStats(t=t, **raw))
-            shot = await asyncio.to_thread(page.screenshot)
-            (out_dir / f"{slug}-p{i}.png").write_bytes(shot)
+                if errors:
+                    return ShotVerdict(
+                        False, f"runtime error: {errors[0]}"
+                    ), [], errors
 
-        await asyncio.to_thread(page.close)
+                probes: list[ProbeStats] = []
+                for i, fraction in enumerate(PROBE_FRACTIONS):
+                    t = fraction * duration
+                    raw = page.evaluate(_STATS_JS, [slug, t])
+                    probes.append(ProbeStats(t=t, **raw))
+                    shot = page.screenshot()
+                    (out_dir / f"{slug}-p{i}.png").write_bytes(shot)
+
+                page.close()
+                return None, probes, errors
+            finally:
+                browser.close()
+        finally:
+            pw.stop()
+
+    maybe_verdict, probes, errors = await asyncio.to_thread(_run)
+    if maybe_verdict is not None:
+        return maybe_verdict, probes, errors
 
     verdict = judge_shot(probes)
     log.info("shot_verified", slug=slug, ok=verdict.ok, reason=verdict.reason)
