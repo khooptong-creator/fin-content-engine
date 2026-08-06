@@ -19,6 +19,11 @@ import structlog
 log = structlog.get_logger()
 
 SCENE_MODEL = os.environ.get("SCENE_MODEL", "gemini-2.0-flash")
+SCENE_MODEL_PROVIDER = os.environ.get("SCENE_MODEL_PROVIDER", "gemini").lower()
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.environ.get(
+    "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
+)
 
 # Matches a fenced JS block — ```javascript, ```js, or bare ```
 _FENCE = re.compile(r"```(?:javascript|js)?\s*\n(.*?)```", re.DOTALL)
@@ -187,8 +192,19 @@ async def author_shot(
     return code
 
 
+def _is_retryable_status(status: int) -> bool:
+    """True for rate limits and server errors worth retrying."""
+    return status in (429, 503, 500)
+
+
 async def _call_model(system: str, user: str) -> str:
     """Single cloud call. Retries transient failures, then raises."""
+    if SCENE_MODEL_PROVIDER == "deepseek":
+        return await _call_deepseek(system, user)
+    return await _call_gemini(system, user)
+
+
+async def _call_gemini(system: str, user: str) -> str:
     import asyncio
 
     from google import genai
@@ -215,5 +231,53 @@ async def _call_model(system: str, user: str) -> str:
             ),
         )
         return response.text or ""
+
+    return await _once()
+
+
+async def _call_deepseek(system: str, user: str) -> str:
+    import asyncio
+
+    import httpx
+    from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+    if not DEEPSEEK_API_KEY:
+        raise RuntimeError(
+            "DEEPSEEK_API_KEY is required when SCENE_MODEL_PROVIDER=deepseek"
+        )
+
+    model = SCENE_MODEL if SCENE_MODEL != "gemini-2.0-flash" else "deepseek-chat"
+
+    def _should_retry(exc: BaseException) -> bool:
+        if isinstance(exc, httpx.HTTPStatusError):
+            return _is_retryable_status(exc.response.status_code)
+        return isinstance(exc, (httpx.ConnectError, httpx.RemoteProtocolError))
+
+    @retry(
+        retry=retry_if_exception(_should_retry),
+        wait=wait_exponential(multiplier=2, min=2, max=30),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    async def _once() -> str:
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.post(
+                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": 0.7,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"] or ""
 
     return await _once()
